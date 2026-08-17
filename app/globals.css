@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Nasconde il bordo di default dello scanner html5-qrcode */
+#qr-reader {
+  border: none !important;
+}
+#qr-reader__dashboard_section_csr button {
+  @apply rounded-lg bg-brand px-4 py-2 text-white;
+}
