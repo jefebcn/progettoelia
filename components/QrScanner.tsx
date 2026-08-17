@@ -29,6 +29,7 @@ export function QrScanner({
       ) => Promise<void>;
       stop: () => Promise<void>;
       clear: () => void;
+      getState?: () => number;
     } | null = null;
 
     (async () => {
@@ -52,13 +53,39 @@ export function QrScanner({
 
     return () => {
       cancelled = true;
-      const s = scannerRef.current as { stop: () => Promise<void>; clear: () => void } | null;
-      if (s) {
-        s.stop()
-          .then(() => s.clear())
-          .catch(() => {
-            /* già fermo */
-          });
+      const s = scannerRef.current as {
+        stop: () => Promise<void>;
+        clear: () => void;
+        getState?: () => number;
+      } | null;
+      if (!s) return;
+      // stop() lancia un'eccezione se lo scanner non è in esecuzione
+      // (es. permesso fotocamera negato). La gestiamo per non far crashare
+      // la pagina al cambio scheda/smontaggio.
+      try {
+        // Html5QrcodeScannerState: 2 = SCANNING, 3 = PAUSED
+        const state = typeof s.getState === "function" ? s.getState() : 2;
+        if (state === 2 || state === 3) {
+          s.stop()
+            .then(() => {
+              try {
+                s.clear();
+              } catch {
+                /* noop */
+              }
+            })
+            .catch(() => {
+              /* già fermo */
+            });
+        } else {
+          try {
+            s.clear();
+          } catch {
+            /* noop */
+          }
+        }
+      } catch {
+        /* stato non recuperabile: ignora */
       }
     };
   }, []);
