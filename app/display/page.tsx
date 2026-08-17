@@ -5,11 +5,15 @@ import { supabase } from "@/lib/supabase";
 import type { Reservation, Slot, SystemState } from "@/lib/types";
 import { formatPass, formatSlotTime, currentSlotTime } from "@/lib/format";
 
+// Un ingresso resta visibile nel display per questo tempo, poi sparisce.
+const ENTRY_VISIBLE_MS = 10 * 60 * 1000; // 10 minuti
+
 export default function DisplayPage() {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [recent, setRecent] = useState<Reservation[]>([]);
   const [state, setState] = useState<SystemState | null>(null);
   const [now, setNow] = useState<string | null>(currentSlotTime());
+  const [nowMs, setNowMs] = useState<number>(0);
 
   const loadAll = useCallback(async () => {
     const [{ data: s }, { data: r }, { data: st }] = await Promise.all([
@@ -19,7 +23,7 @@ export default function DisplayPage() {
         .select("*")
         .in("status", ["checked_in", "manual_entry"])
         .order("checked_in_at", { ascending: false })
-        .limit(8),
+        .limit(20),
       supabase.from("system_state").select("*").eq("id", true).maybeSingle(),
     ]);
     if (s) setSlots(s as Slot[]);
@@ -29,6 +33,7 @@ export default function DisplayPage() {
 
   useEffect(() => {
     loadAll();
+    setNowMs(Date.now());
     const channel = supabase
       .channel("display-realtime")
       .on(
@@ -48,7 +53,10 @@ export default function DisplayPage() {
       )
       .subscribe();
 
-    const interval = setInterval(() => setNow(currentSlotTime()), 20_000);
+    const interval = setInterval(() => {
+      setNow(currentSlotTime());
+      setNowMs(Date.now());
+    }, 15_000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -58,6 +66,16 @@ export default function DisplayPage() {
 
   const callingSlot = slots.find((s) => s.slot_time === now) ?? null;
   const suspended = state?.intake_suspended;
+
+  // Mostra solo gli ingressi convalidati negli ultimi 10 minuti.
+  const visibleEntries = recent
+    .filter(
+      (r) =>
+        r.checked_in_at &&
+        nowMs > 0 &&
+        nowMs - Date.parse(r.checked_in_at) <= ENTRY_VISIBLE_MS,
+    )
+    .slice(0, 8);
 
   return (
     <main className="flex min-h-screen flex-col bg-slate-900 p-8 text-white">
@@ -101,7 +119,7 @@ export default function DisplayPage() {
             Ultimi ingressi
           </h2>
           <ul className="space-y-3">
-            {recent.map((r) => (
+            {visibleEntries.map((r) => (
               <li
                 key={r.id}
                 className="flex items-center justify-between rounded-2xl bg-slate-700/60 px-6 py-4 text-3xl font-bold"
@@ -114,7 +132,7 @@ export default function DisplayPage() {
                 </span>
               </li>
             ))}
-            {recent.length === 0 && (
+            {visibleEntries.length === 0 && (
               <li className="py-10 text-center text-2xl text-slate-500">
                 In attesa dei primi ingressi…
               </li>

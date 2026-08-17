@@ -11,6 +11,8 @@ import {
   XCircle,
   Loader2,
   X,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { Reservation, Slot, SystemState } from "@/lib/types";
@@ -35,6 +37,7 @@ export default function CheckinPage() {
     null,
   );
   const [showQuickEntry, setShowQuickEntry] = useState(false);
+  const [showReset, setShowReset] = useState(false);
   const [search, setSearch] = useState("");
   const lastScanRef = useRef<{ id: string; at: number }>({ id: "", at: 0 });
 
@@ -156,6 +159,19 @@ export default function CheckinPage() {
     if (error) flash("Errore aggiornamento slot.", false);
   }
 
+  async function resetDay() {
+    const { error } = await supabase.rpc("reset_day", {
+      p_reset_numbers: true,
+    });
+    if (error) {
+      flash("Errore durante il reset. Riprova.", false);
+      return false;
+    }
+    await loadAll();
+    flash("Giornata azzerata. Tutto pronto per ripartire.", true);
+    return true;
+  }
+
   const filteredReservations = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return reservations;
@@ -202,6 +218,12 @@ export default function CheckinPage() {
                 <Pause className="h-4 w-4" /> Sospendi prenotazioni
               </>
             )}
+          </button>
+          <button
+            onClick={() => setShowReset(true)}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            <RotateCcw className="h-4 w-4" /> Reset
           </button>
         </div>
       </header>
@@ -364,7 +386,97 @@ export default function CheckinPage() {
           }}
         />
       )}
+
+      {/* Modale reset giornata */}
+      {showReset && (
+        <ResetModal
+          reservationsCount={reservations.length}
+          onClose={() => setShowReset(false)}
+          onConfirm={resetDay}
+        />
+      )}
     </main>
+  );
+}
+
+function ResetModal({
+  reservationsCount,
+  onClose,
+  onConfirm,
+}: {
+  reservationsCount: number;
+  onClose: () => void;
+  onConfirm: () => Promise<boolean>;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const canReset = text.trim().toUpperCase() === "RESET";
+
+  async function handle() {
+    if (!canReset || busy) return;
+    setBusy(true);
+    const ok = await onConfirm();
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+      <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-lg font-bold text-red-600">
+            <AlertTriangle className="h-5 w-5" /> Reset giornata
+          </h3>
+          <button
+            onClick={onClose}
+            className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <p className="text-sm text-slate-600">
+          Questa azione <strong>cancella tutte le prenotazioni</strong> (
+          {reservationsCount} attuali), azzera i posti di ogni slot, riattiva
+          tutti gli slot e riporta la numerazione pass a #101.
+        </p>
+        <p className="mt-2 text-sm font-medium text-red-600">
+          L&apos;operazione non è reversibile.
+        </p>
+
+        <label className="mt-4 block text-sm text-slate-600">
+          Scrivi <span className="font-mono font-bold">RESET</span> per
+          confermare:
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="RESET"
+            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 uppercase outline-none focus:border-red-500"
+          />
+        </label>
+
+        <div className="mt-5 flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            Annulla
+          </button>
+          <button
+            onClick={handle}
+            disabled={!canReset || busy}
+            className="flex-[2] inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <RotateCcw className="h-5 w-5" />
+            )}
+            Azzera tutto
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
