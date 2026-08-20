@@ -19,10 +19,11 @@ export default function PosterPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-white px-6 py-10 text-center text-slate-900">
       <div className="flex w-full max-w-md flex-col items-center rounded-3xl border border-slate-200 p-8 shadow-sm print:border-0 print:shadow-none">
-        <span className="text-sm font-semibold uppercase tracking-widest text-brand">
-          Ingresso
+        <div className="text-4xl">🎄🎅🎁</div>
+        <span className="mt-2 text-sm font-semibold uppercase tracking-widest text-holly">
+          Ingresso · Buone Feste
         </span>
-        <h1 className="mt-2 text-4xl font-black leading-tight">
+        <h1 className="mt-2 text-4xl font-black leading-tight text-brand">
           Prenota il tuo ingresso
         </h1>
         <p className="mt-3 flex items-center gap-2 text-lg text-slate-500">

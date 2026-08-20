@@ -9,9 +9,18 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Palette natalizia
         brand: {
-          DEFAULT: "#2563eb",
-          dark: "#1d4ed8",
+          DEFAULT: "#15803d", // verde abete
+          dark: "#166534",
+        },
+        holly: {
+          DEFAULT: "#b91c1c", // rosso natale
+          dark: "#991b1b",
+        },
+        gold: {
+          DEFAULT: "#d4a017",
+          dark: "#b8860b",
         },
       },
     },

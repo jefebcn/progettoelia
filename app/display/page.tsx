@@ -78,9 +78,11 @@ export default function DisplayPage() {
     .slice(0, 8);
 
   return (
-    <main className="flex min-h-screen flex-col bg-slate-900 p-8 text-white">
+    <main className="flex min-h-screen flex-col bg-gradient-to-br from-green-950 via-slate-900 to-red-950 p-8 text-white">
       <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-300">Area ingressi</h1>
+        <h1 className="text-2xl font-semibold text-slate-200">
+          🎄 Area ingressi · Buone Feste 🎅
+        </h1>
         <Clock />
       </header>
 
@@ -141,8 +143,8 @@ export default function DisplayPage() {
         </section>
       </div>
 
-      <footer className="mt-8 text-center text-lg text-slate-500">
-        Gli aggiornamenti sono in tempo reale
+      <footer className="mt-8 text-center text-lg text-slate-400">
+        ❄️ Gli aggiornamenti sono in tempo reale · Buone Feste ❄️
       </footer>
     </main>
   );

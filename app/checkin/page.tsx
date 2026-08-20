@@ -189,9 +189,9 @@ export default function CheckinPage() {
       {/* Header + azioni globali */}
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold">Check-in operatore</h1>
+          <h1 className="text-xl font-bold">🎅 Check-in operatore</h1>
           <p className="text-sm text-slate-500">
-            Convalida i pass, gestisci walk-in e sospensioni.
+            Convalida i pass, gestisci walk-in e sospensioni. Buone feste!
           </p>
         </div>
         <div className="flex gap-2">

@@ -138,9 +138,12 @@ export default function BookingPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col px-4 py-6">
       <header className="mb-6 text-center">
-        <h1 className="text-2xl font-bold tracking-tight">Prenota il tuo ingresso</h1>
+        <div className="mb-1 text-3xl">🎄🎅🎁</div>
+        <h1 className="text-2xl font-bold tracking-tight text-holly">
+          Prenota il tuo ingresso
+        </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Bastano 5 secondi. Nessun account, nessun dato di contatto.
+          Buone feste! Bastano 5 secondi, nessun account e nessun dato di contatto.
         </p>
       </header>
 
@@ -272,14 +275,14 @@ export default function BookingPage() {
             </>
           ) : (
             <>
-              <CheckCircle2 className="h-5 w-5" /> Conferma prenotazione
+              <CheckCircle2 className="h-5 w-5" /> 🎁 Conferma prenotazione
             </>
           )}
         </button>
       </form>
 
       <footer className="mt-auto pt-8 text-center text-xs text-slate-400">
-        Ingressi a slot di 15 minuti · capienza massima 15 persone per slot
+        🎄 Ingressi a slot di 15 minuti · capienza massima 15 persone per slot ❄️
       </footer>
     </main>
   );

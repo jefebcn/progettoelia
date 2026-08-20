@@ -123,7 +123,7 @@ export default function PassPage({ params }: { params: { id: string } }) {
 
       <div className="flex flex-col items-center rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <span className="text-sm font-medium uppercase tracking-wide text-slate-400">
-          Pass ingresso
+          🎟️ Pass ingresso di Natale
         </span>
         <span className="text-5xl font-black tracking-tight text-brand">
           {formatPass(reservation.pass_number)}
