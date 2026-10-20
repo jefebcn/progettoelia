@@ -43,6 +43,43 @@ const ACTIONS: Record<string, (p: Params) => Promise<Result>> = {
     );
   },
 
+  // Riepilogo dei giorni con prenotazioni, da oggi in avanti.
+  staff_overview: async () =>
+    ok(
+      await query(
+        `select s.slot_date as date,
+                count(*)::int as bookings,
+                sum(r.total_people)::int as people,
+                count(*) filter (where r.status in ('checked_in', 'manual_entry'))::int as entered
+           from reservations r join slots s on s.id = r.slot_id
+          where s.slot_date >= $1 and r.status <> 'no_show'
+          group by s.slot_date
+          order by s.slot_date
+          limit 400`,
+        [eventToday()],
+      ),
+    ),
+
+  // Ricerca per nome/cognome o numero pass su tutte le date.
+  staff_search: async (p) => {
+    const q = asText(p.p_query).trim().slice(0, 60);
+    if (q.length < 2) return ok([]);
+    const pass = /^#?\d{1,6}$/.test(q) ? Number(q.replace("#", "")) : null;
+    const like = `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
+    return ok(
+      await query<Reservation>(
+        `select r.*, s.slot_date, s.slot_time
+           from reservations r join slots s on s.id = r.slot_id
+          where r.pass_number = $2
+             or (r.first_name || ' ' || r.last_name) ilike $1
+             or (r.last_name || ' ' || r.first_name) ilike $1
+          order by s.slot_date, s.slot_time, r.created_at
+          limit 100`,
+        [like, pass],
+      ),
+    );
+  },
+
   // Periodo prenotabile: crea gli slot dei giorni nuovi, non tocca quelli esistenti.
   staff_set_period: async (p) => {
     if (!isDate(p.p_start) || !isDate(p.p_end) || p.p_start > p.p_end) return fail("INVALID_PERIOD");

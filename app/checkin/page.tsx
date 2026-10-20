@@ -45,6 +45,8 @@ import { ConfigNotice } from "@/components/ConfigNotice";
 
 type Tab = "scan" | "manual";
 
+type DayOverview = { date: string; bookings: number; people: number; entered: number };
+
 export default function CheckinPage() {
   const [pin, setPin] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -140,6 +142,8 @@ function CheckinDashboard({
   const [today, setToday] = useState(() => eventToday());
   const [viewDate, setViewDate] = useState(() => eventToday());
   const [showPeriod, setShowPeriod] = useState(false);
+  const [overview, setOverview] = useState<DayOverview[]>([]);
+  const [searchResults, setSearchResults] = useState<Reservation[] | null>(null);
   const [active, setActive] = useState<Reservation | null>(null);
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(
     null,
@@ -162,10 +166,12 @@ function CheckinDashboard({
   );
 
   const loadAll = useCallback(async () => {
-    const [st, r] = await Promise.all([
+    const [st, r, ov] = await Promise.all([
       api.state(viewDate),
       call<Reservation[]>("staff_list_reservations", { p_date: viewDate }),
+      call<DayOverview[]>("staff_overview"),
     ]);
+    if (ov.ok) setOverview(ov.data ?? []);
     setOffline(!st.ok || !r.ok);
     if (st.ok) {
       setSlots(st.data.slots);
@@ -269,7 +275,23 @@ function CheckinDashboard({
     return true;
   }
 
+  // Da 2 caratteri in su la ricerca vale per tutte le date (sul server).
+  const globalSearch = search.trim().length >= 2;
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    const h = setTimeout(async () => {
+      const r = await call<Reservation[]>("staff_search", { p_query: q });
+      if (r.ok) setSearchResults(r.data ?? []);
+    }, 300);
+    return () => clearTimeout(h);
+  }, [search, call]);
+
   const filteredReservations = useMemo(() => {
+    if (globalSearch) return searchResults ?? [];
     const q = search.trim().toLowerCase();
     if (!q) return reservations;
     return reservations.filter(
@@ -277,7 +299,7 @@ function CheckinDashboard({
         `${r.first_name} ${r.last_name}`.toLowerCase().includes(q) ||
         String(r.pass_number).includes(q),
     );
-  }, [reservations, search]);
+  }, [reservations, search, globalSearch, searchResults]);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-5">
@@ -477,10 +499,15 @@ function CheckinDashboard({
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Cerca per nome o numero pass…"
+                  placeholder="Cerca nome o numero pass (tutte le date)…"
                   className="w-full outline-none"
                 />
               </div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+                {globalSearch
+                  ? `Risultati su tutte le date (${filteredReservations.length})`
+                  : `Prenotazioni di ${viewDate === today ? "oggi" : formatDayLong(viewDate)} (${reservations.length})`}
+              </p>
               <ul className="max-h-[60vh] divide-y divide-slate-100 overflow-y-auto">
                 {filteredReservations.map((r) => {
                   const time = r.slot_time ?? slots.find((s) => s.id === r.slot_id)?.slot_time;
@@ -495,6 +522,17 @@ function CheckinDashboard({
                           {r.last_name}
                         </div>
                         <div className="text-xs text-slate-400">
+                          {globalSearch && r.slot_date && (
+                            <span
+                              className={`mr-1 rounded px-1.5 py-0.5 font-semibold ${
+                                r.slot_date === today
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {r.slot_date === today ? "oggi" : formatDayShort(r.slot_date)}
+                            </span>
+                          )}
                           {time ? formatSlotTime(time) : "—"} ·{" "}
                           {r.total_people} pers. · {statusText(r.status)}
                         </div>
@@ -510,13 +548,51 @@ function CheckinDashboard({
                 })}
                 {filteredReservations.length === 0 && (
                   <li className="py-8 text-center text-sm text-slate-400">
-                    Nessuna prenotazione per {viewDate === today ? "oggi" : formatDayShort(viewDate)}.
+                    {globalSearch
+                      ? "Nessun risultato su nessuna data."
+                      : `Nessuna prenotazione per ${viewDate === today ? "oggi" : formatDayShort(viewDate)}.`}
                   </li>
                 )}
               </ul>
             </div>
           )}
         </section>
+
+        <div className="space-y-5">
+        {/* Riepilogo dei prossimi giorni */}
+        <aside className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h2 className="mb-3 text-sm font-semibold text-slate-700">Prossimi giorni</h2>
+          {overview.length === 0 ? (
+            <p className="py-3 text-center text-sm text-slate-400">Nessuna prenotazione da oggi in poi.</p>
+          ) : (
+            <ul className="max-h-[40vh] space-y-1.5 overflow-y-auto">
+              {overview.map((d) => (
+                <li key={d.date}>
+                  <button
+                    onClick={() => {
+                      setViewDate(d.date);
+                      setSearch("");
+                      setTab("manual");
+                    }}
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
+                      d.date === viewDate
+                        ? "bg-slate-800 text-white"
+                        : "bg-slate-50 hover:bg-slate-100"
+                    }`}
+                  >
+                    <span className="font-semibold first-letter:uppercase">
+                      {d.date === today ? "Oggi" : formatDayLong(d.date)}
+                    </span>
+                    <span className={`text-xs ${d.date === viewDate ? "text-white/80" : "text-slate-500"}`}>
+                      {d.bookings} pren. · {d.people} pers.
+                      {d.date === today && ` · ${d.entered} entrati`}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
 
         {/* Pannello slot */}
         <aside className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -558,6 +634,7 @@ function CheckinDashboard({
             ))}
           </ul>
         </aside>
+        </div>
       </div>
 
       {/* Modale dettaglio prenotazione */}

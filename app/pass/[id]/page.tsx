@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 import {
   ArrowLeft,
@@ -8,6 +8,7 @@ import {
   BellRing,
   CheckCircle2,
   Clock,
+  Download,
   Hourglass,
   Loader2,
   Users,
@@ -27,6 +28,7 @@ import {
 import { Backdrop } from "@/components/festive/Backdrop";
 import { GoldFrame, Ornament } from "@/components/festive/GoldFrame";
 import { Village } from "@/components/festive/Village";
+import { downloadPassImage } from "@/lib/passImage";
 
 export default function PassPage({ params }: { params: { id: string } }) {
   const { id } = params;
@@ -37,6 +39,9 @@ export default function PassPage({ params }: { params: { id: string } }) {
   const [nowTick, setNowTick] = useState(0);
 
   const [offline, setOffline] = useState(false);
+  // QR ad alta risoluzione (nascosto) usato per l'immagine da scaricare.
+  const hiQrRef = useRef<HTMLCanvasElement>(null);
+  const [download, setDownload] = useState<"idle" | "busy" | "done" | "error">("idle");
 
   useEffect(() => {
     let active = true;
@@ -170,8 +175,59 @@ export default function PassPage({ params }: { params: { id: string } }) {
             fgColor="#0b2019"
           />
         </div>
+        <QRCodeCanvas
+          ref={hiQrRef}
+          value={qrValue}
+          size={720}
+          level="M"
+          includeMargin
+          bgColor="#f6efe2"
+          fgColor="#0b2019"
+          className="hidden"
+          aria-hidden
+        />
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={async () => {
+              if (!hiQrRef.current || download === "busy") return;
+              setDownload("busy");
+              try {
+                const kids = reservation.children_count;
+                await downloadPassImage({
+                  qr: hiQrRef.current,
+                  passLabel: formatPass(reservation.pass_number),
+                  dayLabel: slot ? capitalize(formatDayLong(slot.slot_date)) : "",
+                  timeLabel: slot ? formatSlotTime(slot.slot_time) : "—",
+                  name: `${reservation.first_name} ${reservation.last_name}`,
+                  people: `${reservation.adults_count} ${reservation.adults_count === 1 ? "adulto" : "adulti"}${kids ? ` · ${kids} ${kids === 1 ? "bambino" : "bambini"}` : ""}`,
+                  fileName: `pass-${reservation.pass_number}.png`,
+                });
+                setDownload("done");
+              } catch {
+                setDownload("error");
+              }
+              setTimeout(() => setDownload("idle"), 2500);
+            }}
+            className="inline-flex items-center gap-2 rounded-full border border-gold/60 bg-gold/15 px-6 py-3 font-semibold text-gold-light shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] transition hover:bg-gold/25 active:scale-[0.97] disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+            disabled={download === "busy"}
+          >
+            {download === "busy" ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : download === "done" ? (
+              <CheckCircle2 className="h-5 w-5" />
+            ) : (
+              <Download className="h-5 w-5" />
+            )}
+            {download === "done"
+              ? "QR code scaricato"
+              : download === "error"
+                ? "Non riuscito, riprova"
+                : "Scarica QR code"}
+          </button>
+        </div>
         <p className="mt-3 text-center text-sm text-cream/75">
-          Mostra questo QR all&apos;operatore all&apos;ingresso.
+          Mostra questo QR all&apos;operatore all&apos;ingresso, anche dalla foto salvata.
         </p>
 
         {/* Linea tratteggiata da biglietto, con le "tacche" ai lati */}
@@ -263,3 +319,5 @@ function Info({
     </div>
   );
 }
+
+const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
