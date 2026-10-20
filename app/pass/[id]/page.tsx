@@ -2,7 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
-import { Loader2, Users, Baby, Clock, ArrowLeft } from "lucide-react";
+import {
+  ArrowLeft,
+  Baby,
+  BellRing,
+  CheckCircle2,
+  Clock,
+  Hourglass,
+  Loader2,
+  Users,
+  XCircle,
+} from "lucide-react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { Reservation, Slot } from "@/lib/types";
@@ -12,6 +22,9 @@ import {
   reservationStatusLabel,
   currentSlotTime,
 } from "@/lib/format";
+import { Backdrop } from "@/components/festive/Backdrop";
+import { GoldFrame, Ornament } from "@/components/festive/GoldFrame";
+import { Village } from "@/components/festive/Village";
 
 export default function PassPage({ params }: { params: { id: string } }) {
   const { id } = params;
@@ -69,32 +82,36 @@ export default function PassPage({ params }: { params: { id: string } }) {
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center text-slate-400">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </main>
+      <Shell>
+        <div className="flex flex-1 items-center justify-center text-gold">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </Shell>
     );
   }
 
   if (!reservation && offline) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-        <p className="text-lg font-semibold text-slate-700">
-          Connessione assente. Riprova tra qualche secondo.
-        </p>
-      </main>
+      <Shell>
+        <Message title="Connessione assente">
+          Riprova tra qualche secondo: la pagina si aggiorna da sola.
+        </Message>
+      </Shell>
     );
   }
 
   if (notFound || !reservation) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-        <p className="text-lg font-semibold text-slate-700">
-          Prenotazione non trovata.
-        </p>
-        <Link href="/" className="text-brand underline">
-          Torna alla prenotazione
-        </Link>
-      </main>
+      <Shell>
+        <Message title="Prenotazione non trovata">
+          <Link
+            href="/"
+            className="mt-2 inline-flex rounded-full border border-gold/50 bg-gold/10 px-5 py-2.5 font-semibold text-gold-light transition hover:bg-gold/20"
+          >
+            Torna alla prenotazione
+          </Link>
+        </Message>
+      </Shell>
     );
   }
 
@@ -106,77 +123,105 @@ export default function PassPage({ params }: { params: { id: string } }) {
     slot && currentSlotTime() === slot.slot_time && status === "booked";
   if (isCalling) display = { label: "È il tuo turno!", tone: "turn" };
 
-  const toneStyles: Record<string, string> = {
-    wait: "bg-amber-50 text-amber-700 border-amber-200",
-    turn: "bg-emerald-50 text-emerald-700 border-emerald-200 animate-pulse",
-    done: "bg-blue-50 text-blue-700 border-blue-200",
-    muted: "bg-slate-100 text-slate-500 border-slate-200",
-  };
+  const tones = {
+    wait: { cls: "border-gold/45 bg-gold/10 text-gold-light", icon: <Hourglass className="h-5 w-5" /> },
+    turn: { cls: "animate-glow border-emerald-300/70 bg-emerald-500/20 text-emerald-100", icon: <BellRing className="h-5 w-5" /> },
+    done: { cls: "border-emerald-400/50 bg-emerald-600/20 text-emerald-100", icon: <CheckCircle2 className="h-5 w-5" /> },
+    muted: { cls: "border-cream/15 bg-cream/5 text-cream/60", icon: <XCircle className="h-5 w-5" /> },
+  } as const;
+  const tone = tones[display.tone];
 
   // Il QR contiene l'ID prenotazione: lo scanner operatore lo legge per il check-in.
   const qrValue = reservation.id;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col px-4 py-6">
-      <Link
-        href="/"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600"
-      >
-        <ArrowLeft className="h-4 w-4" /> Nuova prenotazione
-      </Link>
-
-      <div className="flex flex-col items-center rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <span className="text-sm font-medium uppercase tracking-wide text-slate-400">
-          🎟️ Pass ingresso di Natale
-        </span>
-        <span className="text-5xl font-black tracking-tight text-brand">
+    <Shell>
+      <header className="text-center">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-gold">
+          ✦ Il tuo pass ✦
+        </p>
+        <p className="text-gold-shine mt-1 font-serif text-6xl font-semibold leading-tight">
           {formatPass(reservation.pass_number)}
-        </span>
+        </p>
+        <Ornament className="mt-1" />
+      </header>
 
-        <div className="my-5 rounded-2xl border border-slate-100 bg-white p-3">
-          <QRCodeCanvas value={qrValue} size={200} level="M" includeMargin />
-        </div>
-
+      <GoldFrame className="mt-6">
         <div
-          className={`w-full rounded-xl border px-4 py-3 text-center text-base font-semibold ${toneStyles[display.tone]}`}
+          role="status"
+          className={`flex items-center justify-center gap-2 rounded-full border px-4 py-3 text-base font-semibold ${tone.cls}`}
         >
+          {tone.icon}
           {display.label}
         </div>
 
-        <div className="mt-5 grid w-full grid-cols-2 gap-3 text-sm">
-          <Info
-            icon={<Clock className="h-4 w-4" />}
-            label="Orario"
-            value={slot ? formatSlotTime(slot.slot_time) : "—"}
-          />
-          <Info
-            label="Nome"
-            value={`${reservation.first_name} ${reservation.last_name}`}
-          />
-          <Info
-            icon={<Users className="h-4 w-4" />}
-            label="Adulti"
-            value={String(reservation.adults_count)}
-          />
-          <Info
-            icon={<Baby className="h-4 w-4" />}
-            label="Bambini"
-            value={String(reservation.children_count)}
+        <div className="mx-auto mt-5 w-fit rounded-3xl border border-gold/50 bg-cream p-3 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.7)]">
+          <QRCodeCanvas
+            value={qrValue}
+            size={208}
+            level="M"
+            includeMargin
+            bgColor="#f6efe2"
+            fgColor="#0b2019"
           />
         </div>
+        <p className="mt-3 text-center text-sm text-cream/75">
+          Mostra questo QR all&apos;operatore all&apos;ingresso.
+        </p>
+
+        {/* Linea tratteggiata da biglietto, con le "tacche" ai lati */}
+        <div aria-hidden className="relative my-5">
+          <div className="border-t border-dashed border-gold/35" />
+          <span className="absolute -left-8 -top-3 h-6 w-6 rounded-full border border-gold/40 bg-pine-deep sm:-left-10" />
+          <span className="absolute -right-8 -top-3 h-6 w-6 rounded-full border border-gold/40 bg-pine-deep sm:-right-10" />
+        </div>
+
+        <dl className="grid grid-cols-2 gap-3">
+          <Info icon={<Clock className="h-4 w-4" />} label="Orario" value={slot ? formatSlotTime(slot.slot_time) : "—"} big />
+          <Info label="Nome" value={`${reservation.first_name} ${reservation.last_name}`} />
+          <Info icon={<Users className="h-4 w-4" />} label="Adulti" value={String(reservation.adults_count)} />
+          <Info icon={<Baby className="h-4 w-4" />} label="Bambini" value={String(reservation.children_count)} />
+        </dl>
 
         {offline && (
-          <p className="mt-4 w-full rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-700">
+          <p className="mt-4 rounded-2xl border border-amber-300/40 bg-amber-400/10 px-3 py-2 text-center text-xs text-amber-100">
             Connessione instabile: il pass resta valido, lo stato si aggiornerà da solo.
           </p>
         )}
 
-        <p className="mt-5 text-center text-xs text-slate-400">
-          Mostra questo QR Code all&apos;operatore all&apos;ingresso. La pagina si
-          aggiorna da sola in tempo reale.
+        <p className="mt-5 text-center text-xs text-cream/45">
+          Questa pagina si aggiorna da sola: puoi tenerla aperta fino all&apos;ingresso.
         </p>
-      </div>
-    </main>
+      </GoldFrame>
+
+      <Link
+        href="/"
+        className="mx-auto mt-6 inline-flex items-center gap-1.5 text-sm text-cream/55 transition hover:text-cream"
+      >
+        <ArrowLeft className="h-4 w-4" /> Nuova prenotazione
+      </Link>
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <Backdrop>
+      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 pb-6 pt-8">
+        {children}
+        <Village className="mt-auto block h-auto w-full pt-8 opacity-90" />
+      </main>
+    </Backdrop>
+  );
+}
+
+function Message({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+      <p className="font-serif text-3xl text-cream">{title}</p>
+      <Ornament />
+      <div className="text-sm text-cream/70">{children}</div>
+    </div>
   );
 }
 
@@ -184,18 +229,22 @@ function Info({
   icon,
   label,
   value,
+  big,
 }: {
   icon?: React.ReactNode;
   label: string;
   value: string;
+  big?: boolean;
 }) {
   return (
-    <div className="rounded-xl bg-slate-50 px-3 py-2">
-      <div className="flex items-center gap-1 text-xs text-slate-400">
+    <div className="rounded-2xl border border-gold/15 bg-pine/60 px-3 py-2.5">
+      <dt className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-gold/90">
         {icon}
         {label}
-      </div>
-      <div className="mt-0.5 font-semibold text-slate-700">{value}</div>
+      </dt>
+      <dd className={`mt-0.5 font-semibold text-cream ${big ? "font-serif text-2xl text-gold-light" : ""}`}>
+        {value}
+      </dd>
     </div>
   );
 }

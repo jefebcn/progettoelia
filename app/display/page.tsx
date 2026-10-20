@@ -9,6 +9,9 @@ import {
   currentSlotTime,
   EVENT_TIME_ZONE,
 } from "@/lib/format";
+import { Backdrop } from "@/components/festive/Backdrop";
+import { GoldFrame, Ornament } from "@/components/festive/GoldFrame";
+import { Village } from "@/components/festive/Village";
 
 // Un ingresso resta visibile nel display per questo tempo, poi sparisce.
 const ENTRY_VISIBLE_MS = 10 * 60 * 1000; // 10 minuti (filtrati anche dal server)
@@ -61,81 +64,81 @@ export default function DisplayPage() {
     .slice(0, 8);
 
   return (
-    <main className="flex min-h-screen flex-col bg-gradient-to-br from-green-950 via-slate-900 to-red-950 p-8 text-white">
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-200">
-          🎄 Area ingressi · Buone Feste 🎅
-        </h1>
-        <Clock />
-      </header>
+    <Backdrop>
+      <main className="flex min-h-screen flex-col px-10 pb-0 pt-8">
+        <header className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-gold">
+              ✦ Buone Feste ✦
+            </p>
+            <h1 className="mt-1 font-serif text-5xl font-semibold text-cream">Area ingressi</h1>
+          </div>
+          <Clock />
+        </header>
 
-      {offline && (
-        <div className="mb-6 rounded-2xl bg-amber-600/80 px-6 py-3 text-center text-lg">
-          Connessione al server persa — riprovo automaticamente…
+        {offline && (
+          <div className="mt-6 rounded-3xl border border-amber-300/40 bg-amber-500/20 px-6 py-3 text-center text-xl text-amber-100">
+            Connessione al server persa — riprovo automaticamente…
+          </div>
+        )}
+
+        {suspended && (
+          <div className="mt-6 animate-pulse rounded-3xl border border-holly-light/60 bg-holly/40 px-8 py-6 text-center">
+            <p className="font-serif text-4xl text-cream">Ingressi temporaneamente sospesi</p>
+            {state?.message ? <p className="mt-2 text-2xl text-cream/85">{state.message}</p> : null}
+          </div>
+        )}
+
+        <div className="mt-8 grid flex-1 gap-8 lg:grid-cols-2">
+          {/* Slot in chiamata */}
+          <GoldFrame className="flex flex-col items-center justify-center !p-10 text-center">
+            <p className="text-xl uppercase tracking-[0.3em] text-gold">Turno in ingresso</p>
+            <p className="text-gold-shine my-4 font-serif text-[9rem] font-semibold leading-none tabular-nums">
+              {callingSlot ? formatSlotTime(callingSlot.slot_time) : "—"}
+            </p>
+            <Ornament />
+            <p className="mt-4 text-2xl text-cream/80">
+              {callingSlot
+                ? `${callingSlot.current_booked} persone prenotate`
+                : "Nessun turno attivo in questo momento"}
+            </p>
+          </GoldFrame>
+
+          {/* Ultimi ingressi convalidati */}
+          <GoldFrame className="!p-8">
+            <h2 className="text-center text-xl uppercase tracking-[0.3em] text-gold">Ultimi ingressi</h2>
+            <Ornament className="mt-3" />
+            <ul className="mt-6 space-y-3">
+              {visibleEntries.map((r, idx) => (
+                <li
+                  key={r.pass_number}
+                  className={[
+                    "flex items-center justify-between rounded-full border px-7 py-3",
+                    idx === 0
+                      ? "border-gold/70 bg-gold/15 shadow-[0_0_30px_-8px_rgba(212,165,72,0.7)]"
+                      : "border-gold/20 bg-pine/60",
+                  ].join(" ")}
+                >
+                  <span className="font-serif text-4xl font-semibold text-gold-light">
+                    {formatPass(r.pass_number)}
+                  </span>
+                  <span className="text-2xl text-cream/85">
+                    {r.first_name} {r.last_initial}.
+                  </span>
+                </li>
+              ))}
+              {visibleEntries.length === 0 && (
+                <li className="py-12 text-center font-serif text-3xl text-cream/45">
+                  In attesa dei primi ingressi…
+                </li>
+              )}
+            </ul>
+          </GoldFrame>
         </div>
-      )}
 
-      {suspended && (
-        <div className="mb-8 animate-pulse rounded-2xl bg-red-600 px-8 py-6 text-center text-3xl font-bold">
-          ⛔ Ingressi temporaneamente sospesi
-          {state?.message ? (
-            <div className="mt-2 text-xl font-normal">{state.message}</div>
-          ) : null}
-        </div>
-      )}
-
-      <div className="grid flex-1 gap-8 lg:grid-cols-2">
-        {/* Slot in chiamata */}
-        <section className="flex flex-col items-center justify-center rounded-3xl bg-slate-800 p-10 text-center">
-          <span className="text-xl uppercase tracking-widest text-slate-400">
-            Slot in ingresso
-          </span>
-          <span className="my-4 text-8xl font-black text-emerald-400">
-            {callingSlot ? formatSlotTime(callingSlot.slot_time) : "—"}
-          </span>
-          {callingSlot ? (
-            <span className="text-2xl text-slate-300">
-              {callingSlot.current_booked} persone prenotate
-            </span>
-          ) : (
-            <span className="text-2xl text-slate-400">
-              Nessuno slot attivo in questo momento
-            </span>
-          )}
-        </section>
-
-        {/* Ultimi ingressi convalidati */}
-        <section className="rounded-3xl bg-slate-800 p-8">
-          <h2 className="mb-5 text-xl uppercase tracking-widest text-slate-400">
-            Ultimi ingressi
-          </h2>
-          <ul className="space-y-3">
-            {visibleEntries.map((r) => (
-              <li
-                key={r.pass_number}
-                className="flex items-center justify-between rounded-2xl bg-slate-700/60 px-6 py-4 text-3xl font-bold"
-              >
-                <span className="text-emerald-400">
-                  {formatPass(r.pass_number)}
-                </span>
-                <span className="text-xl font-normal text-slate-300">
-                  {r.first_name} {r.last_initial}.
-                </span>
-              </li>
-            ))}
-            {visibleEntries.length === 0 && (
-              <li className="py-10 text-center text-2xl text-slate-500">
-                In attesa dei primi ingressi…
-              </li>
-            )}
-          </ul>
-        </section>
-      </div>
-
-      <footer className="mt-8 text-center text-lg text-slate-400">
-        ❄️ Gli aggiornamenti sono in tempo reale · Buone Feste ❄️
-      </footer>
-    </main>
+        <Village className="mx-auto -mb-1 mt-6 block h-auto w-full max-w-5xl" />
+      </main>
+    </Backdrop>
   );
 }
 
@@ -154,5 +157,9 @@ function Clock() {
     const i = setInterval(tick, 1000);
     return () => clearInterval(i);
   }, []);
-  return <span className="text-2xl font-semibold tabular-nums">{time}</span>;
+  return (
+    <span className="rounded-full border border-gold/40 bg-pine-deep/70 px-6 py-2 font-serif text-4xl tabular-nums text-cream">
+      {time}
+    </span>
+  );
 }

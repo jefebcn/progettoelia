@@ -55,4 +55,17 @@ body {
   .snowflake {
     display: none;
   }
+  .animate-bokeh,
+  .animate-glow,
+  .animate-pulse {
+    animation: none !important;
+  }
+}
+
+/* Testo dorato con riflesso (numero pass, titoli). */
+.text-gold-shine {
+  background: linear-gradient(180deg, #f6dfa2 0%, #d4a548 55%, #a97c2c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
