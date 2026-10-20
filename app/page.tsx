@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Baby, Check, Loader2, Sparkles, Users, WifiOff } from "lucide-react";
 import { api } from "@/lib/api";
-import type { Slot } from "@/lib/types";
+import type { DaySummary, Slot } from "@/lib/types";
 import {
+  formatDayLong,
+  formatDayParts,
   formatSlotTime,
   remainingSeats,
   isSlotPast,
@@ -25,6 +27,12 @@ const FEW_SEATS = 4;
 export default function BookingPage() {
   const router = useRouter();
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [days, setDays] = useState<DaySummary[]>([]);
+  const [today, setToday] = useState<string | null>(null);
+  // Giorno scelto: finché è null lo propone il server (primo giorno con posti).
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const dateRef = useRef(selectedDate);
+  dateRef.current = selectedDate;
   const [intakeSuspended, setIntakeSuspended] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -44,16 +52,21 @@ export default function BookingPage() {
   const groupSize = adults + children;
 
   const loadSlots = useCallback(async () => {
-    const res = await api.state();
+    const res = await api.state(selectedDate);
+    // Risposta di un giorno non più selezionato: la ignoriamo.
+    if (res.ok && dateRef.current && res.data.date !== dateRef.current) return;
     if (res.ok) {
       setSlots(res.data.slots);
+      setDays(res.data.days);
+      setToday(res.data.today);
+      if (!selectedDate) setSelectedDate(res.data.date);
       setIntakeSuspended(res.data.system.intake_suspended);
       setLoadError(false);
     } else {
       setLoadError(true);
     }
     setLoading(false);
-  }, []);
+  }, [selectedDate]);
 
   useEffect(() => {
     try {
@@ -80,8 +93,16 @@ export default function BookingPage() {
     };
   }, [loadSlots]);
 
-  // Gli slot già conclusi non si mostrano più.
-  const upcomingSlots = slots.filter((s) => !isSlotPast(s));
+  // Gli slot già conclusi non si mostrano più; solo quelli del giorno scelto.
+  const upcomingSlots = slots.filter((s) => s.slot_date === selectedDate && !isSlotPast(s));
+
+  function chooseDay(date: string) {
+    if (date === selectedDate) return;
+    setSelectedDate(date);
+    setSelectedSlotId(null);
+    setSlots([]);
+    setLoading(true);
+  }
 
   const isSlotSelectable = useCallback(
     (slot: Slot) =>
@@ -251,6 +272,15 @@ export default function BookingPage() {
                 ) : null
               }
             >
+              {days.length > 1 && (
+                <DayStrip days={days} today={today} selected={selectedDate} onSelect={chooseDay} />
+              )}
+              {selectedDate && (
+                <p className="mb-3 text-center font-serif text-lg first-letter:uppercase text-gold-light">
+                  {selectedDate === today ? "Oggi, " : ""}
+                  {formatDayLong(selectedDate)}
+                </p>
+              )}
               {loading ? (
                 <SlotSkeleton />
               ) : loadError ? (
@@ -268,9 +298,14 @@ export default function BookingPage() {
                     Riprova
                   </button>
                 </div>
+              ) : days.length === 0 ? (
+                <p className="rounded-2xl border border-gold/20 bg-pine/60 px-4 py-6 text-center text-sm text-cream/80">
+                  🎄 Al momento non ci sono giorni prenotabili. Torna a trovarci presto!
+                </p>
               ) : upcomingSlots.length === 0 ? (
                 <p className="rounded-2xl border border-gold/20 bg-pine/60 px-4 py-6 text-center text-sm text-cream/80">
-                  🎄 Per oggi le prenotazioni sono chiuse. Ti aspettiamo domani!
+                  🎄 Per {selectedDate === today ? "oggi" : "questo giorno"} non ci sono più orari.
+                  {days.some((d) => d.date !== selectedDate && d.free > 0) && " Scegli un altro giorno qui sopra."}
                 </p>
               ) : (
                 <>
@@ -297,6 +332,12 @@ export default function BookingPage() {
               {selectedSlot && nameDone && (
                 <p className="px-3 pb-2 pt-1 text-center text-xs text-cream/75">
                   <span className="font-semibold text-gold-light">
+                    {selectedSlot.slot_date === today
+                      ? "Oggi"
+                      : (() => {
+                          const p = formatDayParts(selectedSlot.slot_date);
+                          return `${p.weekday} ${p.day} ${p.month}`;
+                        })()}{" "}
                     {formatSlotTime(selectedSlot.slot_time)}
                   </span>{" "}
                   · {groupSize} {groupSize === 1 ? "persona" : "persone"} ·{" "}
@@ -344,7 +385,9 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <fieldset>
+    // min-w-0: per default un fieldset non si restringe sotto il suo contenuto,
+    // e la fila di giorni scorrevole allargherebbe tutta la pagina.
+    <fieldset className="min-w-0">
       <legend className="mb-3 flex w-full items-center justify-between gap-2">
         <span className="flex items-center gap-3">
           <span
@@ -580,6 +623,66 @@ function Legend() {
       {item("bg-emerald-400", "Disponibile")}
       {item("bg-amber-400", "Ultimi posti")}
       {item("bg-cream/30", "Pieno o troppo piccolo per il gruppo")}
+    </div>
+  );
+}
+
+/** Fila di giorni scorrevole: giorno della settimana, data e posti liberi. */
+function DayStrip({
+  days,
+  today,
+  selected,
+  onSelect,
+}: {
+  days: DaySummary[];
+  today: string | null;
+  selected: string | null;
+  onSelect: (date: string) => void;
+}) {
+  return (
+    <div
+      className="-mx-1 mb-3 flex snap-x gap-2 overflow-x-auto px-1 pb-2 pt-1 [scrollbar-width:thin]"
+      role="radiogroup"
+      aria-label="Giorno di visita"
+    >
+      {days.map((d) => {
+        const p = formatDayParts(d.date);
+        const isSel = d.date === selected;
+        const closed = d.upcoming === 0;
+        const full = closed || d.free <= 0;
+        return (
+          <button
+            key={d.date}
+            type="button"
+            role="radio"
+            aria-checked={isSel}
+            aria-label={`${formatDayLong(d.date)}, ${closed ? "chiuso" : full ? "pieno" : `${d.free} posti liberi`}`}
+            onClick={() => onSelect(d.date)}
+            className={[
+              "flex min-w-[64px] shrink-0 snap-start flex-col items-center rounded-2xl border px-2 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold",
+              isSel
+                ? "border-gold bg-gradient-to-b from-gold-light to-gold text-pine-deep shadow-[0_8px_20px_-8px_rgba(212,165,72,0.8)]"
+                : full
+                  ? "border-cream/5 bg-cream/[0.03] text-cream/35"
+                  : "border-gold/25 bg-pine-light/60 text-cream hover:border-gold/70",
+            ].join(" ")}
+          >
+            <span className="text-[10px] uppercase tracking-wider">
+              {d.date === today ? "oggi" : p.weekday}
+            </span>
+            <span className="font-serif text-2xl leading-tight">{p.day}</span>
+            <span className="text-[10px] uppercase">{p.month}</span>
+            <span
+              className={[
+                "mt-1 text-[10px] leading-none",
+                isSel ? "text-pine-deep/75" : full ? "" : "text-emerald-300",
+              ].join(" ")}
+            >
+              {closed ? "chiuso" : full ? "pieno" : `${d.free} posti`}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

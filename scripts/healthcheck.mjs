@@ -40,15 +40,13 @@ check(health.body?.staffPin === true, "PIN operatore impostato", health.body?.st
 
 if (db === "ok") {
   const state = await get("/api/state");
-  const slots = state.body?.slots ?? [];
-  check(state.status === 200 && slots.length > 0, "Orari disponibili", `${slots.length} slot`);
-  if (slots.length) {
-    const booked = slots.reduce((a, s) => a + s.current_booked, 0);
-    const full = slots.filter((s) => s.status === "full").length;
-    const susp = slots.filter((s) => s.status === "suspended").length;
-    console.log(`   ↳ ${booked} posti prenotati · ${full} slot pieni · ${susp} sospesi`);
-  }
-  if (state.body?.system?.intake_suspended) console.log("   ⚠️  Le prenotazioni risultano SOSPESE in questo momento.");
+  const days = state.body?.days ?? [];
+  const sys = state.body?.system ?? {};
+  check(state.status === 200 && days.length > 0, "Giorni prenotabili", `${days.length} giorni`);
+  console.log(`   ↳ periodo ${sys.event_start} → ${sys.event_end}${sys.period_confirmed ? "" : " (provvisorio: impostalo da /checkin)"}`);
+  const open = days.filter((d) => d.free > 0);
+  if (open.length) console.log(`   ↳ primo giorno con posti: ${open[0].date} (${open[0].free} posti liberi)`);
+  if (sys.intake_suspended) console.log("   ⚠️  Le prenotazioni risultano SOSPESE in questo momento.");
 }
 
 console.log(failures ? `\n${failures} controlli falliti.\n` : "\nTutto ok 🎄\n");

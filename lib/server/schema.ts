@@ -8,8 +8,11 @@
  *
  * Il database è raggiungibile solo dal server dell'app: niente ruoli pubblici,
  * niente RLS. Il PIN operatore è la variabile d'ambiente STAFF_PIN.
+ *
+ * v2: gli slot hanno una data (slot_date). Le date prenotabili sono il periodo
+ * dell'evento (system_state.event_start/event_end), modificabile dallo staff.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_SQL = /* sql */ `
 create table if not exists app_meta (
@@ -22,7 +25,8 @@ create sequence if not exists pass_number_seq start 101;
 
 create table if not exists slots (
   id             uuid primary key default gen_random_uuid(),
-  slot_time      time not null unique,
+  slot_date      date not null,
+  slot_time      time not null,
   max_capacity   int  not null default 15,
   current_booked int  not null default 0 check (current_booked >= 0),
   status         text not null default 'active'
@@ -58,13 +62,41 @@ create table if not exists system_state (
 );
 insert into system_state (id) values (true) on conflict (id) do nothing;
 
--- Slot da 10:00 a 16:45 ogni 15 minuti (ultimo ingresso 16:45).
-insert into slots (slot_time)
-select g::time
-  from generate_series(timestamp '2000-01-01 10:00',
-                       timestamp '2000-01-01 16:45',
-                       interval '15 minutes') as g
-on conflict (slot_time) do nothing;
+-- v1 -> v2: ogni slot appartiene a un giorno. Gli slot esistenti (senza data)
+-- diventano quelli di oggi; l'unicità passa da "orario" a "giorno + orario".
+alter table slots add column if not exists slot_date date;
+update slots set slot_date = (now() at time zone 'Europe/Rome')::date where slot_date is null;
+alter table slots alter column slot_date set not null;
+alter table slots drop constraint if exists slots_slot_time_key;
+create unique index if not exists slots_date_time_key on slots (slot_date, slot_time);
+
+-- Periodo dell'evento. Finché lo staff non lo imposta è provvisorio:
+-- da oggi per i prossimi 30 giorni.
+alter table system_state add column if not exists event_start date;
+alter table system_state add column if not exists event_end date;
+alter table system_state add column if not exists period_confirmed boolean not null default false;
+update system_state
+   set event_start = (now() at time zone 'Europe/Rome')::date,
+       event_end   = (now() at time zone 'Europe/Rome')::date + 30
+ where id = true and (event_start is null or event_end is null);
+
+-- Crea gli slot (10:00-16:45 ogni 15 minuti) per ogni giorno del periodo.
+-- Gli slot già esistenti, e le loro prenotazioni, non vengono toccati.
+create or replace function ensure_period_slots()
+returns void
+language sql
+set search_path = public
+as $$
+  insert into slots (slot_date, slot_time)
+  select d::date, t::time
+    from system_state s,
+         generate_series(s.event_start::timestamp, s.event_end::timestamp, interval '1 day') as d,
+         generate_series(timestamp '2000-01-01 10:00', timestamp '2000-01-01 16:45',
+                         interval '15 minutes') as t
+   where s.id = true
+  on conflict (slot_date, slot_time) do nothing;
+$$;
+select ensure_period_slots();
 
 -- Tentativi di PIN errati (anti brute-force).
 create table if not exists pin_failures (
@@ -94,7 +126,7 @@ declare
   v_first  text := trim(coalesce(p_first_name, ''));
   v_last   text := trim(coalesce(p_last_name, ''));
   v_res    reservations;
-  v_now    time := (now() at time zone 'Europe/Rome')::time;
+  v_now    timestamp := now() at time zone 'Europe/Rome';
 begin
   if p_status not in ('booked', 'manual_entry') then
     raise exception 'INVALID_STATUS';
@@ -125,8 +157,13 @@ begin
     if v_total > v_slot.max_capacity then
       raise exception 'GROUP_TOO_LARGE';
     end if;
+    -- Solo i giorni del periodo dell'evento sono prenotabili dal pubblico.
+    if not exists (select 1 from system_state
+                    where id = true and v_slot.slot_date between event_start and event_end) then
+      raise exception 'DATE_CLOSED';
+    end if;
     -- Slot già concluso (ogni slot dura 15 minuti, ora di Roma).
-    if extract(epoch from v_slot.slot_time) + 15 * 60 <= extract(epoch from v_now) then
+    if v_slot.slot_date + v_slot.slot_time + interval '15 minutes' <= v_now then
       raise exception 'SLOT_PAST';
     end if;
   end if;

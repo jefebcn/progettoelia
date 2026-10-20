@@ -8,7 +8,8 @@ automatico (ogni pochi secondi) tra telefono utente, tablet operatore e display 
 ## Principi di progettazione
 
 - **Zero frizione / GDPR-friendly** — nessun login, nessun dato di contatto (no email, no telefono). Si prenota in ~5 secondi con Nome, Cognome, n° adulti e n° bambini.
-- **Niente overbooking** — slot da 15 minuti dalle 10:00 alle 16:45 (chiusura 17:00), capienza massima tassativa di **15 persone** per slot, garantita dal database con un lock di riga anche con richieste simultanee.
+- **Prenotazione anche in anticipo** — si sceglie il giorno (tra quelli del periodo dell'evento) e poi l'orario; il QR all'ingresso funziona anche per prenotare in giornata.
+- **Niente overbooking** — slot da 15 minuti dalle 10:00 alle 16:45 (chiusura 17:00) per ogni giorno, capienza massima tassativa di **15 persone** per slot, garantita dal database con un lock di riga anche con richieste simultanee.
 - **Dati protetti** — il browser parla solo con le API dell'app: il database e i nomi dei visitatori non sono mai esposti. L'area operatore è protetta da PIN.
 - **Gestione imprevisti** — l'operatore può sospendere le prenotazioni, segnare assenti (i posti tornano liberi) e registrare walk-in al volo.
 
@@ -25,7 +26,7 @@ automatico (ogni pochi secondi) tra telefono utente, tablet operatore e display 
 |---------------|--------------------|----------|
 | `/`           | Smartphone utente  | Form di prenotazione minimale con selezione slot |
 | `/pass/[id]`  | Smartphone utente  | Pass con QR Code e stato ingresso aggiornato da solo |
-| `/checkin`    | Tablet operatore   | PIN, scanner QR, ricerca manuale, ingresso rapido, sospensione, reset |
+| `/checkin`    | Tablet operatore   | PIN, giorno visualizzato, periodo dell'evento, scanner QR, ricerca manuale, ingresso rapido, sospensione, azzeramento |
 | `/display`    | TV / Monitor sala  | Display pubblico full-screen con slot in chiamata e ultimi ingressi |
 | `/poster`     | Stampa             | Poster con il QR che apre il form di prenotazione |
 
@@ -43,7 +44,11 @@ al primo accesso: non serve eseguire SQL a mano. Tabelle `slots`, `reservations`
   (ora di Roma), gruppi oltre la capienza e nomi vuoti.
 - **`staff_check_in` / `staff_mark_no_show`** — check-in e assenze; un assente libera i posti,
   il suo check-in tardivo li rioccupa.
-- **`reset_day`** — azzera prenotazioni e contatori e riporta la numerazione a #101.
+- **`ensure_period_slots`** — crea gli slot di ogni giorno del periodo dell'evento
+  (`system_state.event_start` / `event_end`) senza toccare quelli esistenti.
+- **`reset_day`** — "Azzera tutto": cancella le prenotazioni di **tutte** le date, azzera i
+  contatori e riporta la numerazione a #101. Serve a ripulire le prove: tra un giorno e
+  l'altro non è necessario, perché ogni giorno ha i suoi slot.
 
 Per modificare lo schema: aggiorna l'SQL (sempre idempotente) e incrementa `SCHEMA_VERSION`.
 
@@ -56,7 +61,9 @@ Per modificare lo schema: aggiorna l'SQL (sempre idempotente) e incrementa `SCHE
    (almeno 6 caratteri), per Production e Preview.
 3. **Redeploy** dell'ultimo deploy di `main` (le variabili valgono dal build successivo).
 
-Al primo accesso al sito le tabelle e gli slot vengono creati automaticamente.
+Al primo accesso al sito le tabelle e gli slot vengono creati automaticamente, con un
+periodo **provvisorio** (da oggi per 30 giorni). Imposta quello vero da `/checkin` →
+**Periodo evento**: il pubblico può prenotare ogni giorno di quel periodo, senza limiti di anticipo.
 Ogni `git push` sul branch di produzione pubblica poi una nuova versione.
 
 ## Sviluppo in locale

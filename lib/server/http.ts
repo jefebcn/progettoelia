@@ -8,6 +8,15 @@ export function isUuid(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Data "YYYY-MM-DD" valida (anche come giorno di calendario). */
+export function isDate(v: unknown): v is string {
+  if (typeof v !== "string" || !DATE_RE.test(v)) return false;
+  const d = new Date(`${v}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+
 export function asInt(v: unknown): number | null {
   return typeof v === "number" && Number.isInteger(v) ? v : null;
 }

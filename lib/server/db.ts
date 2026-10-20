@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 import { SCHEMA_SQL, SCHEMA_VERSION } from "./schema";
 
 /**
@@ -21,6 +21,10 @@ export class DbNotConfiguredError extends Error {
     super("DB_NOT_CONFIGURED");
   }
 }
+
+// Le colonne "date" restano stringhe "YYYY-MM-DD": convertirle in Date
+// introdurrebbe spostamenti di fuso orario.
+types.setTypeParser(1082, (v) => v);
 
 let pool: Pool | null = null;
 

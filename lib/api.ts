@@ -1,4 +1,4 @@
-import type { Reservation, Slot, SystemState } from "./types";
+import type { DaySummary, Reservation, Slot, SystemState } from "./types";
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -36,7 +36,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<ApiResult<T
 }
 
 export const api = {
-  state: () => request<{ slots: Slot[]; system: SystemState }>("/api/state"),
+  /** Senza data il server sceglie il primo giorno con posti liberi. */
+  state: (date?: string | null) =>
+    request<{
+      today: string;
+      date: string;
+      system: SystemState;
+      days: DaySummary[];
+      slots: Slot[];
+    }>(`/api/state${date ? `?date=${encodeURIComponent(date)}` : ""}`),
 
   book: (p: {
     slotId: string;

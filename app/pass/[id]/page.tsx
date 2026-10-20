@@ -21,6 +21,8 @@ import {
   formatSlotTime,
   reservationStatusLabel,
   currentSlotTime,
+  eventToday,
+  formatDayLong,
 } from "@/lib/format";
 import { Backdrop } from "@/components/festive/Backdrop";
 import { GoldFrame, Ornament } from "@/components/festive/GoldFrame";
@@ -120,7 +122,10 @@ export default function PassPage({ params }: { params: { id: string } }) {
 
   // "È il tuo turno!" se lo slot è quello attualmente in chiamata e non ancora entrato.
   const isCalling =
-    slot && currentSlotTime() === slot.slot_time && status === "booked";
+    slot &&
+    slot.slot_date === eventToday() &&
+    currentSlotTime() === slot.slot_time &&
+    status === "booked";
   if (isCalling) display = { label: "È il tuo turno!", tone: "turn" };
 
   const tones = {
@@ -177,6 +182,16 @@ export default function PassPage({ params }: { params: { id: string } }) {
         </div>
 
         <dl className="grid grid-cols-2 gap-3">
+          {slot && (
+            <div className="col-span-2 rounded-2xl border border-gold/30 bg-gold/10 px-3 py-2.5 text-center">
+              <dt className="text-[11px] font-medium uppercase tracking-wider text-gold/90">
+                {slot.slot_date === eventToday() ? "Oggi" : "Giorno della visita"}
+              </dt>
+              <dd className="mt-0.5 font-serif text-xl first-letter:uppercase text-cream">
+                {formatDayLong(slot.slot_date)}
+              </dd>
+            </div>
+          )}
           <Info icon={<Clock className="h-4 w-4" />} label="Orario" value={slot ? formatSlotTime(slot.slot_time) : "—"} big />
           <Info label="Nome" value={`${reservation.first_name} ${reservation.last_name}`} />
           <Info icon={<Users className="h-4 w-4" />} label="Adulti" value={String(reservation.adults_count)} />

@@ -3,6 +3,7 @@ import {
   asInt,
   asText,
   clientIp,
+  isDate,
   isUuid,
   json,
   statusFor,
@@ -10,6 +11,10 @@ import {
 import { pinError } from "@/lib/server/pin";
 import { getReservation } from "@/lib/server/queries";
 import type { Reservation } from "@/lib/types";
+import { eventToday } from "@/lib/format";
+
+/** Durata massima del periodo dell'evento, in giorni. */
+const MAX_PERIOD_DAYS = 400;
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +28,35 @@ const fail = (error: string): Result => ({ ok: false, error });
 const ACTIONS: Record<string, (p: Params) => Promise<Result>> = {
   staff_login: async () => ok(),
 
-  staff_list_reservations: async () =>
-    ok(await query<Reservation>(`select * from reservations order by created_at desc limit 500`)),
+  // Prenotazioni di un giorno (di default oggi), in ordine di orario.
+  staff_list_reservations: async (p) => {
+    const date = isDate(p.p_date) ? p.p_date : eventToday();
+    return ok(
+      await query<Reservation>(
+        `select r.*, s.slot_date, s.slot_time
+           from reservations r join slots s on s.id = r.slot_id
+          where s.slot_date = $1
+          order by s.slot_time, r.created_at
+          limit 1000`,
+        [date],
+      ),
+    );
+  },
+
+  // Periodo prenotabile: crea gli slot dei giorni nuovi, non tocca quelli esistenti.
+  staff_set_period: async (p) => {
+    if (!isDate(p.p_start) || !isDate(p.p_end) || p.p_start > p.p_end) return fail("INVALID_PERIOD");
+    const days = (Date.parse(p.p_end) - Date.parse(p.p_start)) / 86_400_000;
+    if (days > MAX_PERIOD_DAYS) return fail("INVALID_PERIOD");
+    await query(
+      `update system_state
+          set event_start = $1, event_end = $2, period_confirmed = true, updated_at = now()
+        where id = true`,
+      [p.p_start, p.p_end],
+    );
+    await query(`select ensure_period_slots()`);
+    return ok();
+  },
 
   staff_get_reservation: async (p) => {
     if (!isUuid(p.p_id)) return fail("NOT_FOUND");

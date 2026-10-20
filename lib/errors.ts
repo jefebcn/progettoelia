@@ -4,6 +4,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SLOT_FULL: "Lo slot selezionato non ha posti sufficienti. Scegline un altro.",
   SLOT_SUSPENDED: "Questo slot è temporaneamente sospeso.",
   SLOT_PAST: "Questo orario è già passato. Scegline uno successivo.",
+  DATE_CLOSED: "Questo giorno non è prenotabile. Scegline un altro.",
+  INVALID_PERIOD: "Periodo non valido: controlla le date (massimo 400 giorni).",
   INTAKE_SUSPENDED: "Le prenotazioni sono momentaneamente sospese. Riprova tra poco.",
   SLOT_NOT_FOUND: "Slot non valido. Aggiorna la pagina e riprova.",
   GROUP_TOO_LARGE: "Il gruppo è troppo numeroso per un solo slot (max 15). Dividetevi in due prenotazioni.",

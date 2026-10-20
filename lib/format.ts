@@ -40,9 +40,53 @@ export function slotMinutes(slotTime: string): number {
   return h * 60 + m;
 }
 
-/** Uno slot è concluso quando sono passati i suoi 15 minuti. */
-export function isSlotPast(slot: Pick<Slot, "slot_time">, now: Date = new Date()): boolean {
+/** Data di oggi nell'ora dell'evento, "YYYY-MM-DD". */
+export function eventToday(now: Date = new Date()): string {
+  // en-CA formatta le date come YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: EVENT_TIME_ZONE }).format(now);
+}
+
+/** Uno slot è concluso quando sono passati i suoi 15 minuti (giorno compreso). */
+export function isSlotPast(
+  slot: Pick<Slot, "slot_time" | "slot_date">,
+  now: Date = new Date(),
+): boolean {
+  const today = eventToday(now);
+  if (slot.slot_date !== today) return slot.slot_date < today;
   return slotMinutes(slot.slot_time) + 15 <= eventMinutesNow(now);
+}
+
+// Le date "YYYY-MM-DD" si formattano a mezzogiorno UTC: nessun fuso le sposta.
+const atNoon = (d: string) => new Date(`${d}T12:00:00Z`);
+
+/** "2026-12-20" -> "domenica 20 dicembre" */
+export function formatDayLong(d: string): string {
+  return new Intl.DateTimeFormat("it-IT", {
+    timeZone: "UTC",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(atNoon(d));
+}
+
+/** "2026-12-20" -> { weekday: "dom", day: "20", month: "dic" } */
+export function formatDayParts(d: string) {
+  const f = (o: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", ...o }).format(atNoon(d)).replace(".", "");
+  return { weekday: f({ weekday: "short" }), day: f({ day: "numeric" }), month: f({ month: "short" }) };
+}
+
+/** "2026-12-20" -> "20/12/2026" */
+export function formatDayShort(d: string): string {
+  const [y, m, day] = d.split("-");
+  return `${day}/${m}/${y}`;
+}
+
+/** Sposta una data "YYYY-MM-DD" di n giorni. */
+export function addDays(d: string, n: number): string {
+  const x = atNoon(d);
+  x.setUTCDate(x.getUTCDate() + n);
+  return x.toISOString().slice(0, 10);
 }
 
 /**
