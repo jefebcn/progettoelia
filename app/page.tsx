@@ -2,25 +2,30 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Users, Baby, Clock, Loader2, CheckCircle2 } from "lucide-react";
+import Link from "next/link";
+import { Users, Baby, Clock, Loader2, CheckCircle2, WifiOff } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { Reservation, Slot, SystemState } from "@/lib/types";
-import { formatSlotTime, remainingSeats } from "@/lib/format";
-import { ConfigNotice } from "@/components/ConfigNotice";
+import {
+  formatSlotTime,
+  remainingSeats,
+  isSlotPast,
+  MAX_GROUP_SIZE,
+} from "@/lib/format";
+import { errorMessage } from "@/lib/errors";
 
-const BOOKING_ERRORS: Record<string, string> = {
-  SLOT_FULL: "Lo slot selezionato non ha posti sufficienti. Scegline un altro.",
-  SLOT_SUSPENDED: "Questo slot è temporaneamente sospeso.",
-  INTAKE_SUSPENDED:
-    "Le prenotazioni sono momentaneamente sospese. Riprova tra poco.",
-  SLOT_NOT_FOUND: "Slot non valido. Aggiorna la pagina e riprova.",
-};
+const LAST_PASS_KEY = "elia-last-pass";
+import { ConfigNotice } from "@/components/ConfigNotice";
 
 export default function BookingPage() {
   const router = useRouter();
   const [slots, setSlots] = useState<Slot[]>([]);
   const [intakeSuspended, setIntakeSuspended] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [lastPassId, setLastPassId] = useState<string | null>(null);
+  // Forza il ricalcolo degli slot passati col passare del tempo.
+  const [, setTick] = useState(0);
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -34,18 +39,30 @@ export default function BookingPage() {
   const groupSize = adults + children;
 
   const loadSlots = useCallback(async () => {
-    const { data } = await supabase
-      .from("slots")
-      .select("*")
-      .order("slot_time", { ascending: true });
-    if (data) setSlots(data as Slot[]);
-    const { data: state } = await supabase
-      .from("system_state")
-      .select("*")
-      .eq("id", true)
-      .maybeSingle();
-    if (state) setIntakeSuspended((state as SystemState).intake_suspended);
-    setLoading(false);
+    try {
+      const [slotsRes, stateRes] = await Promise.all([
+        supabase.from("slots").select("*").order("slot_time", { ascending: true }),
+        supabase.from("system_state").select("*").eq("id", true).maybeSingle(),
+      ]);
+      if (slotsRes.error) throw slotsRes.error;
+      setSlots((slotsRes.data ?? []) as Slot[]);
+      if (stateRes.data)
+        setIntakeSuspended((stateRes.data as SystemState).intake_suspended);
+      setLoadError(false);
+    } catch {
+      // Prima il form restava vuoto senza spiegazioni: ora mostriamo un errore.
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      setLastPassId(localStorage.getItem(LAST_PASS_KEY));
+    } catch {
+      /* noop */
+    }
   }, []);
 
   useEffect(() => {
@@ -58,6 +75,10 @@ export default function BookingPage() {
         { event: "*", schema: "public", table: "slots" },
         (payload) => {
           setSlots((prev) => {
+            if (payload.eventType === "DELETE") {
+              const oldId = (payload.old as Partial<Slot>).id;
+              return prev.filter((s) => s.id !== oldId);
+            }
             const next = [...prev];
             const row = payload.new as Slot;
             const idx = next.findIndex((s) => s.id === row.id);
@@ -76,14 +97,28 @@ export default function BookingPage() {
       )
       .subscribe();
 
+    const interval = setInterval(() => setTick((t) => t + 1), 30_000);
+    // Quando il telefono torna in primo piano, riallinea i dati.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadSlots();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [loadSlots]);
 
+  // Gli slot già conclusi non si mostrano più.
+  const upcomingSlots = slots.filter((s) => !isSlotPast(s));
+
   const isSlotSelectable = useCallback(
     (slot: Slot) =>
-      slot.status === "active" && remainingSeats(slot) >= groupSize,
+      slot.status === "active" &&
+      !isSlotPast(slot) &&
+      remainingSeats(slot) >= groupSize,
     [groupSize],
   );
 
@@ -121,10 +156,7 @@ export default function BookingPage() {
     });
 
     if (rpcError) {
-      const key = Object.keys(BOOKING_ERRORS).find((k) =>
-        rpcError.message.includes(k),
-      );
-      setError(key ? BOOKING_ERRORS[key] : "Errore durante la prenotazione. Riprova.");
+      setError(errorMessage(rpcError.message, "Errore durante la prenotazione. Riprova."));
       setSubmitting(false);
       // Ricarica gli slot per riflettere lo stato più recente.
       loadSlots();
@@ -132,6 +164,12 @@ export default function BookingPage() {
     }
 
     const reservation = data as Reservation;
+    try {
+      // Così chi chiude il browser ritrova il proprio pass dalla home.
+      localStorage.setItem(LAST_PASS_KEY, reservation.id);
+    } catch {
+      /* noop */
+    }
     router.push(`/pass/${reservation.id}`);
   }
 
@@ -148,6 +186,16 @@ export default function BookingPage() {
       </header>
 
       <ConfigNotice />
+
+      {lastPassId && (
+        <Link
+          href={`/pass/${lastPassId}`}
+          className="mb-4 flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
+        >
+          <span>🎟️ Hai già prenotato? Apri il tuo pass</span>
+          <span aria-hidden>→</span>
+        </Link>
+      )}
 
       {intakeSuspended && (
         <div className="mb-4 rounded-xl border border-red-300 bg-red-50 p-4 text-center text-sm font-medium text-red-700">
@@ -191,6 +239,7 @@ export default function BookingPage() {
             icon={<Users className="h-4 w-4" />}
             value={adults}
             min={1}
+            max={MAX_GROUP_SIZE - children}
             onChange={setAdults}
           />
           <Counter
@@ -198,12 +247,18 @@ export default function BookingPage() {
             icon={<Baby className="h-4 w-4" />}
             value={children}
             min={0}
+            max={MAX_GROUP_SIZE - adults}
             onChange={setChildren}
           />
         </div>
         <p className="-mt-2 text-center text-sm text-slate-500">
           Gruppo di <span className="font-semibold text-slate-700">{groupSize}</span>{" "}
           {groupSize === 1 ? "persona" : "persone"}
+          {groupSize >= MAX_GROUP_SIZE && (
+            <span className="block text-xs text-amber-600">
+              Massimo {MAX_GROUP_SIZE} persone per prenotazione.
+            </span>
+          )}
         </p>
 
         {/* Selezione slot */}
@@ -215,9 +270,28 @@ export default function BookingPage() {
             <div className="flex justify-center py-8 text-slate-400">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-700">
+              <WifiOff className="h-6 w-6" />
+              Non riusciamo a caricare gli orari in questo momento.
+              <button
+                type="button"
+                onClick={() => {
+                  setLoading(true);
+                  loadSlots();
+                }}
+                className="rounded-lg bg-white px-4 py-2 font-semibold text-red-700 shadow-sm ring-1 ring-red-200"
+              >
+                Riprova
+              </button>
+            </div>
+          ) : upcomingSlots.length === 0 ? (
+            <p className="rounded-xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+              🎄 Per oggi le prenotazioni sono chiuse. Ti aspettiamo domani!
+            </p>
           ) : (
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {slots.map((slot) => {
+              {upcomingSlots.map((slot) => {
                 const selectable = isSlotSelectable(slot);
                 const remaining = remainingSeats(slot);
                 const selected = slot.id === selectedSlotId;
@@ -293,12 +367,14 @@ function Counter({
   icon,
   value,
   min,
+  max,
   onChange,
 }: {
   label: string;
   icon: React.ReactNode;
   value: number;
   min: number;
+  max: number;
   onChange: (v: number) => void;
 }) {
   return (
@@ -321,8 +397,9 @@ function Counter({
         </span>
         <button
           type="button"
-          onClick={() => onChange(value + 1)}
-          className="h-9 w-9 rounded-lg bg-slate-100 text-xl font-semibold text-slate-700 active:bg-slate-200"
+          onClick={() => onChange(Math.min(max, value + 1))}
+          disabled={value >= max}
+          className="h-9 w-9 rounded-lg bg-slate-100 text-xl font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-30"
           aria-label={`Aumenta ${label}`}
         >
           +

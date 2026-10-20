@@ -80,10 +80,40 @@ App su [http://localhost:3000](http://localhost:3000).
 3. **Deploy**. Da qui in poi ogni `git push` sul branch di produzione pubblica
    automaticamente una nuova versione; le altre branch/PR generano Preview Deployment.
 
+## Aggiornamento 0003 — sicurezza operatore e correzioni
+
+Esegui nel **SQL Editor** di Supabase, in ordine, `0001_init.sql`, `0002_reset_day.sql`
+(se non già fatto) e poi [`0003_security_and_fixes.sql`](supabase/migrations/0003_security_and_fixes.sql).
+Subito dopo imposta il PIN dell'area operatore (minimo 6 caratteri):
+
+```sql
+select private.set_staff_pin('scegli-un-pin');
+```
+
+Cosa cambia:
+
+- `/checkin` chiede il PIN; tutte le azioni operatore passano da funzioni `staff_*` che lo verificano
+  (10 tentativi errati ogni 15 minuti per IP, poi blocco temporaneo).
+- La anon key non può più leggere i nomi dei visitatori, modificare slot/stato o lanciare il reset.
+- `book_reservation` non accetta più `p_status` (prima si poteva prenotare come "già entrato" scavalcando la sospensione).
+- "Assente" restituisce i posti allo slot; il check-in di un assente li rioccupa.
+- Il database rifiuta slot già conclusi (ora di Roma), gruppi oltre la capienza e nomi vuoti.
+- Pass e display leggono i dati tramite `get_pass(id)` e `recent_entries()` con polling ogni 5 s.
+
+## Diagnosi e keep-alive
+
+```bash
+npm run healthcheck   # verifica raggiungibilità, migrazioni, PIN e permessi
+```
+
+Il piano Free di Supabase mette in **pausa** il progetto dopo ~7 giorni senza attività: l'app
+smette di mostrare gli orari. Il workflow [`.github/workflows/supabase-keepalive.yml`](.github/workflows/supabase-keepalive.yml)
+fa una richiesta ogni 2 giorni; per attivarlo aggiungi i secret `SUPABASE_URL` e
+`SUPABASE_ANON_KEY` in **GitHub → Settings → Secrets and variables → Actions**.
+
 ## Nota sulla sicurezza
 
-Essendo un'app pubblica senza autenticazione, le policy RLS sono volutamente
-permissive per funzionare con la `anon key`. In **produzione**, le operazioni
-riservate all'operatore (check-in, sospensione, modifica slot) andrebbero protette
-da un ruolo/autenticazione dedicato (es. una route `/checkin` dietro Supabase Auth).
-Il dettaglio è commentato nella migrazione SQL.
+Con la migrazione 0003 le operazioni riservate all'operatore sono protette da PIN.
+Per un evento più grande conviene passare a utenti operatore veri con Supabase Auth.
+La prenotazione resta pubblica: per limitare prenotazioni false si può aggiungere
+un CAPTCHA (es. Cloudflare Turnstile) davanti a `book_reservation`.

@@ -21,26 +21,41 @@ export default function PassPage({ params }: { params: { id: string } }) {
   const [notFound, setNotFound] = useState(false);
   const [nowTick, setNowTick] = useState(0);
 
+  const [offline, setOffline] = useState(false);
+
   useEffect(() => {
     let active = true;
 
     async function load() {
-      const { data: res } = await supabase
-        .from("reservations")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
+      // Le prenotazioni non sono più leggibili in blocco dalla anon key:
+      // il pass si legge solo tramite la funzione get_pass(id).
+      const { data: rows, error } = await supabase.rpc("get_pass", { p_id: id });
       if (!active) return;
-      if (!res) {
-        setNotFound(true);
+      if (error) {
+        // Errore di rete: teniamo a schermo l'ultimo pass noto.
+        setOffline(true);
         setLoading(false);
         return;
       }
-      setReservation(res as Reservation);
+      setOffline(false);
+      const res = (rows as Reservation[] | null)?.[0] ?? null;
+      if (!res) {
+        setNotFound(true);
+        setLoading(false);
+        try {
+          if (localStorage.getItem("elia-last-pass") === id)
+            localStorage.removeItem("elia-last-pass");
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+      setReservation(res);
+      setNotFound(false);
       const { data: s } = await supabase
         .from("slots")
         .select("*")
-        .eq("id", (res as Reservation).slot_id)
+        .eq("id", res.slot_id)
         .maybeSingle();
       if (!active) return;
       if (s) setSlot(s as Slot);
@@ -49,26 +64,13 @@ export default function PassPage({ params }: { params: { id: string } }) {
 
     load();
 
-    const channel = supabase
-      .channel(`pass-${id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "reservations",
-          filter: `id=eq.${id}`,
-        },
-        (payload) => setReservation(payload.new as Reservation),
-      )
-      .subscribe();
-
-    // Aggiorna l'indicazione "è il tuo turno" col passare del tempo.
+    // Aggiornamento dello stato (check-in) ogni 5 secondi + "è il tuo turno".
+    const poll = setInterval(load, 5_000);
     const interval = setInterval(() => setNowTick((t) => t + 1), 30_000);
 
     return () => {
       active = false;
-      supabase.removeChannel(channel);
+      clearInterval(poll);
       clearInterval(interval);
     };
   }, [id]);
@@ -77,6 +79,16 @@ export default function PassPage({ params }: { params: { id: string } }) {
     return (
       <main className="flex min-h-screen items-center justify-center text-slate-400">
         <Loader2 className="h-8 w-8 animate-spin" />
+      </main>
+    );
+  }
+
+  if (!reservation && offline) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-lg font-semibold text-slate-700">
+          Connessione assente. Riprova tra qualche secondo.
+        </p>
       </main>
     );
   }
@@ -160,6 +172,12 @@ export default function PassPage({ params }: { params: { id: string } }) {
             value={String(reservation.children_count)}
           />
         </div>
+
+        {offline && (
+          <p className="mt-4 w-full rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-700">
+            Connessione instabile: il pass resta valido, lo stato si aggiornerà da solo.
+          </p>
+        )}
 
         <p className="mt-5 text-center text-xs text-slate-400">
           Mostra questo QR Code all&apos;operatore all&apos;ingresso. La pagina si

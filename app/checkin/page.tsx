@@ -13,6 +13,8 @@ import {
   X,
   RotateCcw,
   AlertTriangle,
+  Lock,
+  LogOut,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { Reservation, Slot, SystemState } from "@/lib/types";
@@ -20,14 +22,108 @@ import {
   formatPass,
   formatSlotTime,
   currentSlotTime,
-  remainingSeats,
+  eventMinutesNow,
+  slotMinutes,
 } from "@/lib/format";
+import { errorMessage } from "@/lib/errors";
+import { getStoredPin, staffRpc, storePin } from "@/lib/staff";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Errori che invalidano la sessione operatore. */
+const AUTH_ERRORS = ["BAD_PIN", "PIN_NOT_SET", "TOO_MANY_ATTEMPTS"];
 import { QrScanner } from "@/components/QrScanner";
 import { ConfigNotice } from "@/components/ConfigNotice";
 
 type Tab = "scan" | "manual";
 
 export default function CheckinPage() {
+  const [pin, setPin] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    setPin(getStoredPin());
+    setReady(true);
+  }, []);
+
+  if (!ready) return null;
+  if (!pin)
+    return (
+      <PinGate
+        onSuccess={(p) => {
+          storePin(p);
+          setPin(p);
+        }}
+      />
+    );
+  return (
+    <CheckinDashboard
+      pin={pin}
+      onLogout={() => {
+        storePin(null);
+        setPin(null);
+      }}
+    />
+  );
+}
+
+function PinGate({ onSuccess }: { onSuccess: (pin: string) => void }) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!value || busy) return;
+    setBusy(true);
+    setErr(null);
+    const res = await staffRpc("staff_login", value);
+    setBusy(false);
+    if (res.ok) onSuccess(value);
+    else setErr(errorMessage(res.error, "Accesso non riuscito."));
+  }
+
+  return (
+    <main className="flex min-h-screen items-center justify-center px-4">
+      <form
+        onSubmit={submit}
+        className="w-full max-w-xs rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+      >
+        <h1 className="mb-1 flex items-center gap-2 text-lg font-bold">
+          <Lock className="h-5 w-5" /> Area operatore
+        </h1>
+        <p className="mb-4 text-sm text-slate-500">Inserisci il PIN per continuare.</p>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="current-password"
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="w-full rounded-xl border border-slate-300 px-3 py-3 text-center text-lg tracking-widest outline-none focus:border-brand"
+          placeholder="••••••"
+        />
+        {err && <p className="mt-3 text-center text-sm text-red-600">{err}</p>}
+        <button
+          type="submit"
+          disabled={!value || busy}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-3 font-semibold text-white disabled:opacity-40"
+        >
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />} Entra
+        </button>
+      </form>
+    </main>
+  );
+}
+
+function CheckinDashboard({
+  pin,
+  onLogout,
+}: {
+  pin: string;
+  onLogout: () => void;
+}) {
   const [tab, setTab] = useState<Tab>("scan");
   const [slots, setSlots] = useState<Slot[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -39,32 +135,36 @@ export default function CheckinPage() {
   const [showQuickEntry, setShowQuickEntry] = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [search, setSearch] = useState("");
+  const [offline, setOffline] = useState(false);
   const lastScanRef = useRef<{ id: string; at: number }>({ id: "", at: 0 });
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Esegue una funzione staff; se il PIN non è più valido esce. */
+  const call = useCallback(
+    async <T,>(fn: string, params: Record<string, unknown> = {}) => {
+      const res = await staffRpc<T>(fn, pin, params);
+      if (!res.ok && AUTH_ERRORS.some((e) => res.error.includes(e))) onLogout();
+      return res;
+    },
+    [pin, onLogout],
+  );
 
   const loadAll = useCallback(async () => {
-    const [{ data: s }, { data: r }, { data: st }] = await Promise.all([
+    const [{ data: s, error: sErr }, r, { data: st }] = await Promise.all([
       supabase.from("slots").select("*").order("slot_time", { ascending: true }),
-      supabase
-        .from("reservations")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(300),
+      call<Reservation[]>("staff_list_reservations"),
       supabase.from("system_state").select("*").eq("id", true).maybeSingle(),
     ]);
+    setOffline(!!sErr || !r.ok);
     if (s) setSlots(s as Slot[]);
-    if (r) setReservations(r as Reservation[]);
+    if (r.ok) setReservations(r.data ?? []);
     if (st) setIntakeSuspended((st as SystemState).intake_suspended);
-  }, []);
+  }, [call]);
 
   useEffect(() => {
     loadAll();
     const channel = supabase
       .channel("checkin-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "reservations" },
-        () => loadAll(),
-      )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "slots" },
@@ -77,27 +177,32 @@ export default function CheckinPage() {
           setIntakeSuspended((payload.new as SystemState).intake_suspended),
       )
       .subscribe();
+    // I check-in fatti da altri tablet arrivano con il polling.
+    const poll = setInterval(loadAll, 5_000);
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(poll);
     };
   }, [loadAll]);
 
   const flash = useCallback((msg: string, ok: boolean) => {
     setFeedback({ msg, ok });
-    setTimeout(() => setFeedback(null), 3500);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFeedback(null), 3500);
   }, []);
 
   const openReservation = useCallback(
     async (id: string) => {
-      const { data } = await supabase
-        .from("reservations")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
-      if (data) setActive(data as Reservation);
-      else flash("Pass non riconosciuto.", false);
+      // Un QR qualsiasi (es. un link) non deve generare errori dal database.
+      if (!UUID_RE.test(id)) {
+        flash("QR non valido: non è un pass di questo evento.", false);
+        return;
+      }
+      const res = await call<Reservation>("staff_get_reservation", { p_id: id });
+      if (res.ok) setActive(res.data);
+      else flash(errorMessage(res.error, "Pass non riconosciuto."), false);
     },
-    [flash],
+    [flash, call],
   );
 
   const handleScan = useCallback(
@@ -114,57 +219,49 @@ export default function CheckinPage() {
   );
 
   async function checkIn(res: Reservation) {
-    const { error } = await supabase
-      .from("reservations")
-      .update({ status: "checked_in", checked_in_at: new Date().toISOString() })
-      .eq("id", res.id);
-    if (error) flash("Errore durante il check-in.", false);
+    const r = await call("staff_check_in", { p_id: res.id });
+    if (!r.ok) flash(errorMessage(r.error, "Errore durante il check-in."), false);
     else {
       flash(`Ingresso ${formatPass(res.pass_number)} confermato.`, true);
       setActive(null);
+      loadAll();
     }
   }
 
   async function markNoShow(res: Reservation) {
-    const { error } = await supabase
-      .from("reservations")
-      .update({ status: "no_show" })
-      .eq("id", res.id);
-    if (error) flash("Errore.", false);
+    // Ora "Assente" restituisce anche i posti allo slot.
+    const r = await call("staff_mark_no_show", { p_id: res.id });
+    if (!r.ok) flash(errorMessage(r.error, "Errore."), false);
     else {
-      flash(`${formatPass(res.pass_number)} segnato come assente.`, true);
+      flash(`${formatPass(res.pass_number)} assente: ${res.total_people} posti liberati.`, true);
       setActive(null);
+      loadAll();
     }
   }
 
   async function toggleSuspend() {
     const next = !intakeSuspended;
-    const { error } = await supabase
-      .from("system_state")
-      .update({ intake_suspended: next, updated_at: new Date().toISOString() })
-      .eq("id", true);
-    if (error) flash("Impossibile aggiornare lo stato.", false);
-    else flash(next ? "Prenotazioni sospese." : "Prenotazioni riattivate.", true);
+    const r = await call("staff_set_intake", { p_suspended: next });
+    if (!r.ok) flash(errorMessage(r.error, "Impossibile aggiornare lo stato."), false);
+    else {
+      setIntakeSuspended(next);
+      flash(next ? "Prenotazioni sospese." : "Prenotazioni riattivate.", true);
+    }
   }
 
   async function toggleSlotSuspend(slot: Slot) {
-    const next = slot.status === "suspended" ? "active" : "suspended";
-    // Non riattivare a 'active' uno slot che è pieno.
-    const resolved =
-      next === "active" && remainingSeats(slot) <= 0 ? "full" : next;
-    const { error } = await supabase
-      .from("slots")
-      .update({ status: resolved })
-      .eq("id", slot.id);
-    if (error) flash("Errore aggiornamento slot.", false);
+    const r = await call("staff_set_slot_suspended", {
+      p_slot_id: slot.id,
+      p_suspended: slot.status !== "suspended",
+    });
+    if (!r.ok) flash(errorMessage(r.error, "Errore aggiornamento slot."), false);
+    else loadAll();
   }
 
   async function resetDay() {
-    const { error } = await supabase.rpc("reset_day", {
-      p_reset_numbers: true,
-    });
-    if (error) {
-      flash("Errore durante il reset. Riprova.", false);
+    const r = await call("staff_reset_day", { p_reset_numbers: true });
+    if (!r.ok) {
+      flash(errorMessage(r.error, "Errore durante il reset. Riprova."), false);
       return false;
     }
     await loadAll();
@@ -194,7 +291,7 @@ export default function CheckinPage() {
             Convalida i pass, gestisci walk-in e sospensioni. Buone feste!
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setShowQuickEntry(true)}
             className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-900"
@@ -220,6 +317,13 @@ export default function CheckinPage() {
             )}
           </button>
           <button
+            onClick={onLogout}
+            title="Esci"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+          <button
             onClick={() => setShowReset(true)}
             className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
           >
@@ -227,6 +331,12 @@ export default function CheckinPage() {
           </button>
         </div>
       </header>
+
+      {offline && (
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+          ⚠️ Connessione al database assente: i dati potrebbero non essere aggiornati.
+        </div>
+      )}
 
       {intakeSuspended && (
         <div className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
@@ -379,10 +489,12 @@ export default function CheckinPage() {
       {showQuickEntry && (
         <QuickEntryModal
           slots={slots}
+          call={call}
           onClose={() => setShowQuickEntry(false)}
           onDone={(msg, ok) => {
             flash(msg, ok);
             setShowQuickEntry(false);
+            loadAll();
           }}
         />
       )}
@@ -530,6 +642,16 @@ function ReservationModal({
 }) {
   const alreadyIn =
     reservation.status === "checked_in" || reservation.status === "manual_entry";
+  // Avviso per chi arriva molto prima o dopo il proprio slot.
+  const diff = slot ? eventMinutesNow() - slotMinutes(slot.slot_time) : 0;
+  const timing =
+    !slot || alreadyIn
+      ? null
+      : diff < -15
+        ? `⏰ In anticipo di ${-diff} min`
+        : diff > 30
+          ? `⏰ In ritardo di ${diff - 15} min`
+          : null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
       <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-xl">
@@ -567,6 +689,11 @@ function ReservationModal({
         >
           Stato: {statusText(reservation.status)}
         </div>
+        {timing && (
+          <div className="mb-4 rounded-lg bg-orange-50 px-3 py-2 text-center text-sm font-medium text-orange-700">
+            {timing}
+          </div>
+        )}
 
         {alreadyIn ? (
           <p className="text-center text-sm text-slate-500">
@@ -604,10 +731,15 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function QuickEntryModal({
   slots,
+  call,
   onClose,
   onDone,
 }: {
   slots: Slot[];
+  call: (
+    fn: string,
+    params?: Record<string, unknown>,
+  ) => Promise<{ ok: true; data: unknown } | { ok: false; error: string }>;
   onClose: () => void;
   onDone: (msg: string, ok: boolean) => void;
 }) {
@@ -620,14 +752,16 @@ function QuickEntryModal({
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function submit() {
     if (!slotId || !firstName.trim() || !lastName.trim()) {
-      onDone("Compila nome, cognome e slot.", false);
+      setErr("Compila nome, cognome e slot.");
       return;
     }
+    setErr(null);
     setSaving(true);
-    const { error } = await supabase.rpc("quick_entry", {
+    const res = await call("staff_quick_entry", {
       p_slot_id: slotId,
       p_first_name: firstName.trim(),
       p_last_name: lastName.trim(),
@@ -636,7 +770,7 @@ function QuickEntryModal({
       p_force: true,
     });
     setSaving(false);
-    if (error) onDone("Errore durante la registrazione.", false);
+    if (!res.ok) setErr(errorMessage(res.error, "Errore durante la registrazione."));
     else onDone("Ingresso rapido registrato.", true);
   }
 
@@ -707,6 +841,11 @@ function QuickEntryModal({
               />
             </label>
           </div>
+          {err && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-600">
+              {err}
+            </p>
+          )}
           <button
             onClick={submit}
             disabled={saving}

@@ -15,19 +15,49 @@ export function remainingSeats(slot: Slot): number {
   return Math.max(0, slot.max_capacity - slot.current_booked);
 }
 
+/** Dimensione massima di un gruppo (= capienza di uno slot). */
+export const MAX_GROUP_SIZE = 15;
+
+/** Fuso orario dell'evento: l'orario non dipende dal telefono/tablet. */
+export const EVENT_TIME_ZONE = "Europe/Rome";
+
+/** Minuti trascorsi dalla mezzanotte, nell'ora dell'evento (Europe/Rome). */
+export function eventMinutesNow(now: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat("it-IT", {
+    timeZone: EVENT_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  return h * 60 + m;
+}
+
+/** "10:15:00" -> 615 */
+export function slotMinutes(slotTime: string): number {
+  const [h, m] = slotTime.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/** Uno slot è concluso quando sono passati i suoi 15 minuti. */
+export function isSlotPast(slot: Pick<Slot, "slot_time">, now: Date = new Date()): boolean {
+  return slotMinutes(slot.slot_time) + 15 <= eventMinutesNow(now);
+}
+
 /**
- * Ritorna lo slot "in chiamata" in base all'orario corrente.
+ * Ritorna lo slot "in chiamata" in base all'orario corrente (ora di Roma).
  * Uno slot è considerato attivo dalla sua ora fino a +15 minuti.
  */
 export function currentSlotTime(now: Date = new Date()): string | null {
-  const minutes = now.getHours() * 60 + now.getMinutes();
+  const minutes = eventMinutesNow(now);
   const start = 10 * 60; // 10:00
   const end = 17 * 60; // 17:00 (chiusura)
   if (minutes < start || minutes >= end) return null;
   const slotIndex = Math.floor((minutes - start) / 15);
-  const slotMinutes = start + slotIndex * 15;
-  const hh = String(Math.floor(slotMinutes / 60)).padStart(2, "0");
-  const mm = String(slotMinutes % 60).padStart(2, "0");
+  const slotMins = start + slotIndex * 15;
+  const hh = String(Math.floor(slotMins / 60)).padStart(2, "0");
+  const mm = String(slotMins % 60).padStart(2, "0");
   return `${hh}:${mm}:00`;
 }
 
