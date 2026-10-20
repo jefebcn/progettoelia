@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Users, Baby, Clock, Loader2, CheckCircle2, WifiOff } from "lucide-react";
-import { supabase } from "@/lib/supabase";
-import type { Reservation, Slot, SystemState } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { Slot } from "@/lib/types";
 import {
   formatSlotTime,
   remainingSeats,
@@ -39,22 +39,16 @@ export default function BookingPage() {
   const groupSize = adults + children;
 
   const loadSlots = useCallback(async () => {
-    try {
-      const [slotsRes, stateRes] = await Promise.all([
-        supabase.from("slots").select("*").order("slot_time", { ascending: true }),
-        supabase.from("system_state").select("*").eq("id", true).maybeSingle(),
-      ]);
-      if (slotsRes.error) throw slotsRes.error;
-      setSlots((slotsRes.data ?? []) as Slot[]);
-      if (stateRes.data)
-        setIntakeSuspended((stateRes.data as SystemState).intake_suspended);
+    const res = await api.state();
+    if (res.ok) {
+      setSlots(res.data.slots);
+      setIntakeSuspended(res.data.system.intake_suspended);
       setLoadError(false);
-    } catch {
+    } else {
       // Prima il form restava vuoto senza spiegazioni: ora mostriamo un errore.
       setLoadError(true);
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -68,34 +62,8 @@ export default function BookingPage() {
   useEffect(() => {
     loadSlots();
 
-    const channel = supabase
-      .channel("booking-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "slots" },
-        (payload) => {
-          setSlots((prev) => {
-            if (payload.eventType === "DELETE") {
-              const oldId = (payload.old as Partial<Slot>).id;
-              return prev.filter((s) => s.id !== oldId);
-            }
-            const next = [...prev];
-            const row = payload.new as Slot;
-            const idx = next.findIndex((s) => s.id === row.id);
-            if (idx >= 0) next[idx] = row;
-            else next.push(row);
-            return next.sort((a, b) => a.slot_time.localeCompare(b.slot_time));
-          });
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "system_state" },
-        (payload) => {
-          setIntakeSuspended((payload.new as SystemState).intake_suspended);
-        },
-      )
-      .subscribe();
+    // Posti e sospensioni si aggiornano da soli ogni 10 secondi.
+    const poll = setInterval(loadSlots, 10_000);
 
     const interval = setInterval(() => setTick((t) => t + 1), 30_000);
     // Quando il telefono torna in primo piano, riallinea i dati.
@@ -105,7 +73,7 @@ export default function BookingPage() {
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(poll);
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
@@ -147,23 +115,23 @@ export default function BookingPage() {
     setSubmitting(true);
     setError(null);
 
-    const { data, error: rpcError } = await supabase.rpc("book_reservation", {
-      p_slot_id: selectedSlotId,
-      p_first_name: firstName.trim(),
-      p_last_name: lastName.trim(),
-      p_adults: adults,
-      p_children: children,
+    const res = await api.book({
+      slotId: selectedSlotId,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      adults,
+      children,
     });
 
-    if (rpcError) {
-      setError(errorMessage(rpcError.message, "Errore durante la prenotazione. Riprova."));
+    if (!res.ok) {
+      setError(errorMessage(res.error, "Errore durante la prenotazione. Riprova."));
       setSubmitting(false);
       // Ricarica gli slot per riflettere lo stato più recente.
       loadSlots();
       return;
     }
 
-    const reservation = data as Reservation;
+    const { reservation } = res.data;
     try {
       // Così chi chiude il browser ritrova il proprio pass dalla home.
       localStorage.setItem(LAST_PASS_KEY, reservation.id);

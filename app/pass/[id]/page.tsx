@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 import { Loader2, Users, Baby, Clock, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import type { Reservation, Slot } from "@/lib/types";
 import {
   formatPass,
@@ -27,19 +27,17 @@ export default function PassPage({ params }: { params: { id: string } }) {
     let active = true;
 
     async function load() {
-      // Le prenotazioni non sono più leggibili in blocco dalla anon key:
-      // il pass si legge solo tramite la funzione get_pass(id).
-      const { data: rows, error } = await supabase.rpc("get_pass", { p_id: id });
+      // Il pass si legge solo conoscendo il suo UUID.
+      const res = await api.pass(id);
       if (!active) return;
-      if (error) {
+      if (!res.ok && res.error !== "NOT_FOUND") {
         // Errore di rete: teniamo a schermo l'ultimo pass noto.
         setOffline(true);
         setLoading(false);
         return;
       }
       setOffline(false);
-      const res = (rows as Reservation[] | null)?.[0] ?? null;
-      if (!res) {
+      if (!res.ok) {
         setNotFound(true);
         setLoading(false);
         try {
@@ -50,15 +48,9 @@ export default function PassPage({ params }: { params: { id: string } }) {
         }
         return;
       }
-      setReservation(res);
+      setReservation(res.data.reservation);
+      setSlot(res.data.slot);
       setNotFound(false);
-      const { data: s } = await supabase
-        .from("slots")
-        .select("*")
-        .eq("id", res.slot_id)
-        .maybeSingle();
-      if (!active) return;
-      if (s) setSlot(s as Slot);
       setLoading(false);
     }
 

@@ -2,118 +2,85 @@
 
 Web app snella per gestire l'afflusso di visitatori in una location fisica.
 L'accesso avviene **esclusivamente tramite scansione di un QR Code** all'ingresso,
-con prenotazioni a slot di 15 minuti, capienza massima per slot e sincronizzazione
-**in tempo reale** tra telefono utente, tablet operatore e display pubblico.
+con prenotazioni a slot di 15 minuti, capienza massima per slot e aggiornamento
+automatico (ogni pochi secondi) tra telefono utente, tablet operatore e display pubblico.
 
 ## Principi di progettazione
 
 - **Zero frizione / GDPR-friendly** — nessun login, nessun dato di contatto (no email, no telefono). Si prenota in ~5 secondi con Nome, Cognome, n° adulti e n° bambini.
-- **Niente overbooking** — slot da 15 minuti dalle 10:00 alle 16:45 (chiusura 17:00), capienza massima tassativa di **15 persone** per slot, garantita a livello di database con transazioni atomiche.
-- **Realtime** — tutti i client si sincronizzano via Supabase Realtime (WebSocket).
-- **Gestione imprevisti** — l'operatore può sospendere le prenotazioni e registrare walk-in al volo.
+- **Niente overbooking** — slot da 15 minuti dalle 10:00 alle 16:45 (chiusura 17:00), capienza massima tassativa di **15 persone** per slot, garantita dal database con un lock di riga anche con richieste simultanee.
+- **Dati protetti** — il browser parla solo con le API dell'app: il database e i nomi dei visitatori non sono mai esposti. L'area operatore è protetta da PIN.
+- **Gestione imprevisti** — l'operatore può sospendere le prenotazioni, segnare assenti (i posti tornano liberi) e registrare walk-in al volo.
 
 ## Stack tecnico
 
-- **Next.js** (App Router, TypeScript, Tailwind CSS)
-- **Supabase** (PostgreSQL + Realtime Subscriptions)
+- **Next.js** (App Router, TypeScript, Tailwind CSS) — pagine + API (`app/api/*`)
+- **Postgres su Neon**, collegato al progetto Vercel (il database si risveglia da solo dopo l'inattività: niente pause da riattivare a mano)
 - **Vercel** (hosting + deploy automatico da GitHub)
-- Librerie: `@supabase/supabase-js`, `qrcode.react` (generazione QR), `html5-qrcode` (scanner fotocamera), `lucide-react` (icone)
+- Librerie: `pg` (driver Postgres), `qrcode.react` (generazione QR), `html5-qrcode` (scanner fotocamera), `lucide-react` (icone)
 
 ## Rotte dell'applicazione
 
 | Route         | Dispositivo        | Funzione |
 |---------------|--------------------|----------|
 | `/`           | Smartphone utente  | Form di prenotazione minimale con selezione slot |
-| `/pass/[id]`  | Smartphone utente  | Pass con QR Code e stato ingresso in tempo reale |
-| `/checkin`    | Tablet operatore   | Scanner QR, ricerca manuale, ingresso rapido, sospensione |
+| `/pass/[id]`  | Smartphone utente  | Pass con QR Code e stato ingresso aggiornato da solo |
+| `/checkin`    | Tablet operatore   | PIN, scanner QR, ricerca manuale, ingresso rapido, sospensione, reset |
 | `/display`    | TV / Monitor sala  | Display pubblico full-screen con slot in chiamata e ultimi ingressi |
+| `/poster`     | Stampa             | Poster con il QR che apre il form di prenotazione |
 
-## Schema database
+API (usate dalle pagine): `/api/state`, `/api/book`, `/api/pass/[id]`, `/api/display`,
+`/api/staff` (richiede il PIN), `/api/health` (diagnosi).
 
-Tre tabelle (`slots`, `reservations`, `system_state`) e due funzioni PostgreSQL
-`security definer`:
+## Database
 
-- **`book_reservation(...)`** — prenotazione atomica. Blocca la riga dello slot
-  con `SELECT … FOR UPDATE` e rifiuta la richiesta se la capienza verrebbe superata:
-  `current_booked` non può **mai** eccedere `max_capacity`, anche con richieste simultanee.
-- **`quick_entry(...)`** — ingresso rapido (walk-in) registrato dall'operatore.
+Lo schema è in [`lib/server/schema.ts`](lib/server/schema.ts) e **viene creato dall'app da sola**
+al primo accesso: non serve eseguire SQL a mano. Tabelle `slots`, `reservations`,
+`system_state`, `pin_failures` e funzioni:
 
-La migrazione completa è in [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql).
+- **`insert_reservation(...)`** — prenotazione atomica (`SELECT … FOR UPDATE` sullo slot):
+  `current_booked` non supera **mai** `max_capacity`. Rifiuta slot sospesi o già conclusi
+  (ora di Roma), gruppi oltre la capienza e nomi vuoti.
+- **`staff_check_in` / `staff_mark_no_show`** — check-in e assenze; un assente libera i posti,
+  il suo check-in tardivo li rioccupa.
+- **`reset_day`** — azzera prenotazioni e contatori e riporta la numerazione a #101.
 
-## Setup locale
+Per modificare lo schema: aggiorna l'SQL (sempre idempotente) e incrementa `SCHEMA_VERSION`.
 
-### 1. Dipendenze
+## Configurazione su Vercel (una volta sola)
+
+1. **Database** — progetto `progettoelia` su Vercel → **Storage** → **Create Database** →
+   **Neon** (piano Free) → regione **Frankfurt (eu-central-1)** → collega al progetto per
+   tutti gli ambienti. Vercel aggiunge da solo la variabile `DATABASE_URL`.
+2. **PIN operatore** — **Settings → Environment Variables** → aggiungi `STAFF_PIN`
+   (almeno 6 caratteri), per Production e Preview.
+3. **Redeploy** dell'ultimo deploy di `main` (le variabili valgono dal build successivo).
+
+Al primo accesso al sito le tabelle e gli slot vengono creati automaticamente.
+Ogni `git push` sul branch di produzione pubblica poi una nuova versione.
+
+## Sviluppo in locale
 
 ```bash
 npm install
+cp .env.example .env.local   # inserisci DATABASE_URL (anche un Postgres locale) e STAFF_PIN
+npm run dev                  # http://localhost:3000
 ```
 
-### 2. Crea il progetto Supabase ed esegui la migrazione
-
-- Crea un progetto su [supabase.com](https://supabase.com).
-- Apri **SQL Editor**, incolla il contenuto di `supabase/migrations/0001_init.sql` ed esegui.
-  (In alternativa, con la Supabase CLI: `supabase db push`.)
-
-### 3. Variabili d'ambiente
-
-Copia `.env.example` in `.env.local` e inserisci le credenziali del progetto
-(**Project Settings → API**):
+## Diagnosi
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+npm run healthcheck -- https://progettoelia.vercel.app
 ```
 
-### 4. Avvio
-
-```bash
-npm run dev
-```
-
-App su [http://localhost:3000](http://localhost:3000).
-
-## Deploy su Vercel (automatico da GitHub)
-
-1. Su [vercel.com/new](https://vercel.com/new) importa il repository **`jefebcn/progettoelia`**.
-2. Nelle impostazioni del progetto Vercel aggiungi le due variabili d'ambiente
-   `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-3. **Deploy**. Da qui in poi ogni `git push` sul branch di produzione pubblica
-   automaticamente una nuova versione; le altre branch/PR generano Preview Deployment.
-
-## Aggiornamento 0003 — sicurezza operatore e correzioni
-
-Esegui nel **SQL Editor** di Supabase, in ordine, `0001_init.sql`, `0002_reset_day.sql`
-(se non già fatto) e poi [`0003_security_and_fixes.sql`](supabase/migrations/0003_security_and_fixes.sql).
-Subito dopo imposta il PIN dell'area operatore (minimo 6 caratteri):
-
-```sql
-select private.set_staff_pin('scegli-un-pin');
-```
-
-Cosa cambia:
-
-- `/checkin` chiede il PIN; tutte le azioni operatore passano da funzioni `staff_*` che lo verificano
-  (10 tentativi errati ogni 15 minuti per IP, poi blocco temporaneo).
-- La anon key non può più leggere i nomi dei visitatori, modificare slot/stato o lanciare il reset.
-- `book_reservation` non accetta più `p_status` (prima si poteva prenotare come "già entrato" scavalcando la sospensione).
-- "Assente" restituisce i posti allo slot; il check-in di un assente li rioccupa.
-- Il database rifiuta slot già conclusi (ora di Roma), gruppi oltre la capienza e nomi vuoti.
-- Pass e display leggono i dati tramite `get_pass(id)` e `recent_entries()` con polling ogni 5 s.
-
-## Diagnosi e keep-alive
-
-```bash
-npm run healthcheck   # verifica raggiungibilità, migrazioni, PIN e permessi
-```
-
-Il piano Free di Supabase mette in **pausa** il progetto dopo ~7 giorni senza attività: l'app
-smette di mostrare gli orari. Il workflow [`.github/workflows/supabase-keepalive.yml`](.github/workflows/supabase-keepalive.yml)
-fa una richiesta ogni 2 giorni; per attivarlo aggiungi i secret `SUPABASE_URL` e
-`SUPABASE_ANON_KEY` in **GitHub → Settings → Secrets and variables → Actions**.
+Verifica che l'app risponda, che il database sia collegato, che il PIN sia impostato
+e che gli orari siano disponibili. Fa solo letture.
 
 ## Nota sulla sicurezza
 
-Con la migrazione 0003 le operazioni riservate all'operatore sono protette da PIN.
-Per un evento più grande conviene passare a utenti operatore veri con Supabase Auth.
-La prenotazione resta pubblica: per limitare prenotazioni false si può aggiungere
-un CAPTCHA (es. Cloudflare Turnstile) davanti a `book_reservation`.
+Le operazioni dell'operatore passano da `/api/staff`, che verifica `STAFF_PIN` sul server
+(10 tentativi errati ogni 15 minuti per IP, poi blocco temporaneo). Tutti i tablet dietro
+la stessa rete Wi-Fi condividono lo stesso IP, quindi un PIN sbagliato più volte li blocca
+tutti per 15 minuti. Per un evento più grande conviene passare a utenti operatore veri.
+La prenotazione resta pubblica: per limitare prenotazioni false si può aggiungere un
+CAPTCHA (es. Cloudflare Turnstile) davanti a `/api/book`.

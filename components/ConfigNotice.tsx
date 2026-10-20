@@ -1,17 +1,24 @@
-import { isSupabaseConfigured } from "@/lib/supabase";
+"use client";
+
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 
 /**
- * Mostra un avviso quando le variabili d'ambiente Supabase non sono configurate,
- * così l'app resta comprensibile anche prima del collegamento al database.
+ * Avvisa quando il database non è ancora collegato (variabile DATABASE_URL
+ * mancante su Vercel), così l'app resta comprensibile prima del setup.
  */
 export function ConfigNotice() {
-  if (isSupabaseConfigured) return null;
+  const [missing, setMissing] = useState(false);
+
+  useEffect(() => {
+    api.health().then((h) => setMissing(h?.db === "not_configured"));
+  }, []);
+
+  if (!missing) return null;
   return (
     <div className="mx-auto mb-4 max-w-md rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-      ⚠️ Supabase non è ancora configurato. Imposta{" "}
-      <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> e{" "}
-      <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> (vedi
-      README) per abilitare prenotazioni e realtime.
+      ⚠️ Il database non è ancora collegato. Su Vercel apri il progetto → Storage →
+      crea un database Neon e collegalo (vedi README).
     </div>
   );
 }

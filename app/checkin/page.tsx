@@ -16,8 +16,8 @@ import {
   Lock,
   LogOut,
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
-import type { Reservation, Slot, SystemState } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { Reservation, Slot } from "@/lib/types";
 import {
   formatPass,
   formatSlotTime,
@@ -150,37 +150,23 @@ function CheckinDashboard({
   );
 
   const loadAll = useCallback(async () => {
-    const [{ data: s, error: sErr }, r, { data: st }] = await Promise.all([
-      supabase.from("slots").select("*").order("slot_time", { ascending: true }),
+    const [st, r] = await Promise.all([
+      api.state(),
       call<Reservation[]>("staff_list_reservations"),
-      supabase.from("system_state").select("*").eq("id", true).maybeSingle(),
     ]);
-    setOffline(!!sErr || !r.ok);
-    if (s) setSlots(s as Slot[]);
+    setOffline(!st.ok || !r.ok);
+    if (st.ok) {
+      setSlots(st.data.slots);
+      setIntakeSuspended(st.data.system.intake_suspended);
+    }
     if (r.ok) setReservations(r.data ?? []);
-    if (st) setIntakeSuspended((st as SystemState).intake_suspended);
   }, [call]);
 
   useEffect(() => {
     loadAll();
-    const channel = supabase
-      .channel("checkin-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "slots" },
-        () => loadAll(),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "system_state" },
-        (payload) =>
-          setIntakeSuspended((payload.new as SystemState).intake_suspended),
-      )
-      .subscribe();
-    // I check-in fatti da altri tablet arrivano con il polling.
+    // Check-in di altri tablet e prenotazioni nuove arrivano con il polling.
     const poll = setInterval(loadAll, 5_000);
     return () => {
-      supabase.removeChannel(channel);
       clearInterval(poll);
     };
   }, [loadAll]);

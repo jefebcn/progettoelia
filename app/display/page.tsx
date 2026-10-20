@@ -1,20 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { api, type RecentEntry } from "@/lib/api";
 import type { Slot, SystemState } from "@/lib/types";
-
-type RecentEntry = {
-  pass_number: number;
-  first_name: string;
-  last_initial: string;
-  checked_in_at: string;
-};
-import { formatPass, formatSlotTime, currentSlotTime } from "@/lib/format";
+import {
+  formatPass,
+  formatSlotTime,
+  currentSlotTime,
+  EVENT_TIME_ZONE,
+} from "@/lib/format";
 
 // Un ingresso resta visibile nel display per questo tempo, poi sparisce.
-const ENTRY_VISIBLE_MS = 10 * 60 * 1000; // 10 minuti
-const ENTRY_VISIBLE_MIN = ENTRY_VISIBLE_MS / 60_000;
+const ENTRY_VISIBLE_MS = 10 * 60 * 1000; // 10 minuti (filtrati anche dal server)
 
 export default function DisplayPage() {
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -25,36 +22,19 @@ export default function DisplayPage() {
   const [nowMs, setNowMs] = useState<number>(0);
 
   const loadAll = useCallback(async () => {
-    const [{ data: s }, { data: r }, { data: st }] = await Promise.all([
-      supabase.from("slots").select("*").order("slot_time", { ascending: true }),
-      // Solo pass, nome e iniziale del cognome (funzione pubblica dedicata).
-      supabase.rpc("recent_entries", { p_minutes: ENTRY_VISIBLE_MIN, p_limit: 8 }),
-      supabase.from("system_state").select("*").eq("id", true).maybeSingle(),
-    ]);
-    setOffline(!s);
-    if (s) setSlots(s as Slot[]);
-    if (r) setRecent(r as RecentEntry[]);
-    if (st) setState(st as SystemState);
+    // Solo pass, nome e iniziale del cognome: il server non manda altro.
+    const res = await api.display();
+    setOffline(!res.ok);
+    if (!res.ok) return;
+    setSlots(res.data.slots);
+    setRecent(res.data.entries);
+    setState(res.data.system);
   }, []);
 
   useEffect(() => {
     loadAll();
     setNowMs(Date.now());
-    const channel = supabase
-      .channel("display-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "slots" },
-        () => loadAll(),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "system_state" },
-        (payload) => setState(payload.new as SystemState),
-      )
-      .subscribe();
-
-    // I check-in non sono più visibili in realtime alla anon key: polling leggero.
+    // Aggiornamento leggero ogni 5 secondi.
     const poll = setInterval(loadAll, 5_000);
     const interval = setInterval(() => {
       setNow(currentSlotTime());
@@ -62,7 +42,6 @@ export default function DisplayPage() {
     }, 15_000);
 
     return () => {
-      supabase.removeChannel(channel);
       clearInterval(interval);
       clearInterval(poll);
     };
@@ -168,6 +147,7 @@ function Clock() {
         new Date().toLocaleTimeString("it-IT", {
           hour: "2-digit",
           minute: "2-digit",
+          timeZone: EVENT_TIME_ZONE,
         }),
       );
     tick();

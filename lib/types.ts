@@ -31,8 +31,6 @@ export interface Reservation {
 }
 
 export interface SystemState {
-  id: boolean;
   intake_suspended: boolean;
   message: string | null;
-  updated_at: string;
 }

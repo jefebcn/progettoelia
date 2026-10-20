@@ -12,12 +12,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INVALID_CHILDREN: "Numero di bambini non valido.",
   // Operatore
   BAD_PIN: "PIN operatore errato.",
-  PIN_NOT_SET: "PIN operatore non ancora impostato sul database (vedi README).",
+  PIN_NOT_SET: "PIN operatore non ancora impostato: aggiungi la variabile STAFF_PIN su Vercel (vedi README).",
   TOO_MANY_ATTEMPTS: "Troppi tentativi errati. Riprova tra 15 minuti.",
   NOT_FOUND: "Pass non riconosciuto.",
   ALREADY_IN: "Ingresso già registrato per questo pass.",
   NOT_BOOKED: "Questo pass non è in stato «prenotato».",
-  // Rete
+  // Server / rete
+  DB_NOT_CONFIGURED: "Il database non è ancora collegato (vedi README).",
+  SERVER_ERROR: "Errore temporaneo del server. Riprova tra qualche secondo.",
   NETWORK: "Impossibile contattare il server. Controlla la connessione e riprova.",
 };
 
