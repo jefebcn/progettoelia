@@ -18,6 +18,10 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
+  Globe,
+  Monitor,
+  Printer,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Reservation, Slot, SystemState } from "@/lib/types";
@@ -306,6 +310,8 @@ function CheckinDashboard({
       <ConfigNotice />
 
       {/* Header + azioni globali */}
+      <StaffNav />
+
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">🎅 Check-in operatore</h1>
@@ -880,6 +886,15 @@ function ReservationModal({
           </div>
         )}
 
+        <a
+          href={`/pass/${reservation.id}`}
+          target="_blank"
+          rel="noopener"
+          className="mb-4 flex items-center justify-center gap-1.5 text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+        >
+          <ExternalLink className="h-4 w-4" /> Apri il pass del visitatore
+        </a>
+
         {alreadyIn ? (
           <p className="text-center text-sm text-slate-500">
             Ingresso già registrato.
@@ -1138,5 +1153,41 @@ function PeriodModal({
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Collegamenti dello staff a tutte le altre parti del sito.
+ * Si aprono in una nuova scheda: la console resta aperta e non serve rifare il PIN.
+ */
+function StaffNav() {
+  const links = [
+    { href: "/", label: "Pagina prenotazione", hint: "come la vedono i visitatori", icon: <Globe className="h-4 w-4" /> },
+    { href: "/display", label: "Display sala", hint: "da aprire sulla TV", icon: <Monitor className="h-4 w-4" /> },
+    { href: "/poster", label: "Poster QR", hint: "da stampare per l'ingresso", icon: <Printer className="h-4 w-4" /> },
+  ];
+  return (
+    <nav
+      aria-label="Altre parti del sito"
+      className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl bg-slate-900 p-2 text-white"
+    >
+      <span className="px-2 text-xs font-semibold uppercase tracking-wider text-white/50">
+        Apri
+      </span>
+      {links.map((l) => (
+        <a
+          key={l.href}
+          href={l.href}
+          target="_blank"
+          rel="noopener"
+          title={l.hint}
+          className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-medium transition hover:bg-white/20"
+        >
+          {l.icon}
+          {l.label}
+          <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+        </a>
+      ))}
+    </nav>
   );
 }
